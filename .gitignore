@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Builds
+dist/
+build/
+.vite/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs / OS / IDE
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Firebase / Netlify local
+.firebase/
+.netlify/
+
+# Coverage / misc
+coverage/
+*.tsbuildinfo

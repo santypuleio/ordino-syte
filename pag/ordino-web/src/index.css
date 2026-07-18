@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-ink-950 text-zinc-100 font-sans antialiased;
+  }
+
+  .font-display {
+    letter-spacing: -0.02em;
+    font-stretch: normal;
+  }
+}

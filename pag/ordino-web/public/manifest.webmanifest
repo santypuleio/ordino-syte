@@ -1,0 +1,25 @@
+{
+  "name": "Ordino — Mis herramientas",
+  "short_name": "Ordino",
+  "description": "Acceso rápido a tu stock y tienda Ordino",
+  "start_url": "/gestionar",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "icons": [
+    {
+      "src": "/demo/icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/demo/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

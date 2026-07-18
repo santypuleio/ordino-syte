@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function ownsBusiness(businessId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userDoc().businessId == businessId
+        && userDoc().role == 'owner';
+    }
+
+    function isOwnerField(businessId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/businesses/$(businessId))
+        && get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid;
+    }
+
+    function canManage(businessId) {
+      return ownsBusiness(businessId) || isOwnerField(businessId);
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid;
+      allow update: if signedIn() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    match /slugs/{slug} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.businessId is string
+        && request.resource.data.keys().hasAll(['businessId']);
+      allow update, delete: if false;
+    }
+
+    match /businesses/{businessId} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.slug == businessId;
+      allow update: if canManage(businessId);
+      allow delete: if false;
+
+      match /products/{productId} {
+        allow read: if true;
+        allow write: if canManage(businessId);
+      }
+
+      match /sales/{saleId} {
+        allow read: if canManage(businessId);
+        allow create: if canManage(businessId);
+        allow update, delete: if false;
+      }
+
+      match /purchases/{purchaseId} {
+        allow read: if canManage(businessId);
+        allow create: if canManage(businessId);
+        allow update, delete: if false;
+      }
+    }
+  }
+}
