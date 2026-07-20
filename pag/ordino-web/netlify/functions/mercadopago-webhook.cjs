@@ -78,14 +78,43 @@ function mapPreapprovalStatus(mpStatus) {
   }
 }
 
+async function resolveBusinessId(pre) {
+  if (pre.external_reference) return String(pre.external_reference);
+
+  const planId = pre.preapproval_plan_id;
+  if (!planId) return null;
+
+  try {
+    const plan = await mpGet(`/preapproval_plan/${planId}`);
+    if (plan.external_reference) return String(plan.external_reference);
+  } catch (err) {
+    console.warn("No se pudo leer plan:", err.message);
+  }
+
+  try {
+    const { getFirestore } = require("./lib/firebaseAdmin.cjs");
+    const snap = await getFirestore()
+      .collection("businesses")
+      .where("mpPreapprovalPlanId", "==", planId)
+      .limit(1)
+      .get();
+    if (!snap.empty) return snap.docs[0].id;
+  } catch (err) {
+    console.warn("Lookup por mpPreapprovalPlanId:", err.message);
+  }
+
+  return null;
+}
+
 async function handlePreapproval(id) {
   const pre = await mpGet(`/preapproval/${id}`);
-  const businessId = pre.external_reference;
-  if (!businessId) return { skipped: true, reason: "sin external_reference" };
+  const businessId = await resolveBusinessId(pre);
+  if (!businessId) return { skipped: true, reason: "sin businessId", planId: pre.preapproval_plan_id || null };
 
   const mapped = mapPreapprovalStatus(pre.status);
   const patch = {
     mpPreapprovalId: pre.id,
+    mpPreapprovalPlanId: pre.preapproval_plan_id || null,
     mpPayerId: pre.payer_id || null,
     mpStatus: pre.status || null,
   };
@@ -114,12 +143,7 @@ async function handlePreapproval(id) {
     });
   }
 
-  if (mapped) {
-    await updateBusiness(businessId, patch);
-  } else {
-    await updateBusiness(businessId, patch);
-  }
-
+  await updateBusiness(businessId, patch);
   return { businessId, mpStatus: pre.status, mapped };
 }
 
