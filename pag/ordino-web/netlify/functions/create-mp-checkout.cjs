@@ -75,7 +75,14 @@ exports.handler = async (event) => {
       return json(502, { error: msg, details: data });
     }
 
-    const initPoint = data.init_point || data.sandbox_init_point;
+    // Test token → siempre sandbox. Prod token → init_point real.
+    // Mezclar ambos da el error: "Una de las partes ... es de prueba".
+    const isTestToken =
+      String(token).startsWith("TEST-") ||
+      String(process.env.MP_MODE || "").toLowerCase() === "test";
+    const initPoint = isTestToken
+      ? data.sandbox_init_point || data.init_point
+      : data.init_point || data.sandbox_init_point;
     if (!initPoint) {
       return json(502, { error: "Mercado Pago no devolvió init_point", details: data });
     }
