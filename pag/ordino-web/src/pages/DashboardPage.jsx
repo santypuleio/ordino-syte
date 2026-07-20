@@ -121,7 +121,12 @@ export default function DashboardPage() {
             `Error del servidor (${res.status}). Revisá MP_ACCESS_TOKEN y el deploy de Netlify.`
         );
       }
-      if (!res.ok) throw new Error(data.error || `No se pudo iniciar el pago (${res.status})`);
+      if (!res.ok) {
+        const extra = data.payerEmailUsed ? ` (payer: ${data.payerEmailUsed})` : "";
+        throw new Error(
+          (data.error || `No se pudo iniciar el pago (${res.status})`) + extra
+        );
+      }
       if (data.url) window.location.href = data.url;
       else throw new Error("Respuesta inválida de Mercado Pago");
     } catch (err) {

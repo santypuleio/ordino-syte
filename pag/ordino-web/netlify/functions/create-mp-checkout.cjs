@@ -85,12 +85,22 @@ exports.handler = async (event) => {
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+      const cause = Array.isArray(data?.cause) ? data.cause : [];
+      const causeMsg = cause
+        .map((c) => c?.description || c?.code || c?.message)
+        .filter(Boolean)
+        .join(" | ");
       const msg =
+        causeMsg ||
         data?.message ||
         data?.error ||
-        (Array.isArray(data?.cause) && data.cause[0]?.description) ||
         `Mercado Pago error ${res.status}`;
-      return json(502, { error: msg, details: data });
+      return json(502, {
+        error: msg,
+        mpStatus: res.status,
+        details: data,
+        payerEmailUsed: payerEmail,
+      });
     }
 
     // Si existe sandbox_init_point, usarlo (credenciales de prueba).
