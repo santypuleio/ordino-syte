@@ -40,40 +40,47 @@ export default function DashboardPage() {
   const priceLabel = `USD ${PLAN_PRICE_USD} / mes`;
   const priceHint = `Equiv. ${formatArs(PLAN_PRICE_ARS)} · cobro vía Mercado Pago`;
 
-  // Si vuelven de MP sin ?checkout=success, igual refrescamos una vez
+  async function syncSubscription() {
+    setBillingMsg("");
+    setBusy(true);
+    try {
+      const res = await fetch("/.netlify/functions/sync-mp-subscription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ businessId: profile.businessId }),
+      });
+      const raw = await res.text();
+      let data = {};
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        throw new Error(raw?.slice(0, 180) || `Error sync (${res.status})`);
+      }
+      if (!res.ok) throw new Error(data.error || `Sync falló (${res.status})`);
+      await refreshBusiness?.();
+      if (data.subscriptionStatus === "active") {
+        setShowActivated(true);
+        setBillingMsg("");
+      } else {
+        setBillingMsg(data.message || "Todavía no figura como activa en Mercado Pago.");
+      }
+    } catch (err) {
+      setBillingMsg(err.message || "No se pudo sincronizar con Mercado Pago.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Al volver de MP, intentar sync (no solo leer Firestore)
   useEffect(() => {
-    if (checkout === "success") return;
+    if (!profile?.businessId) return;
     if (typeof document === "undefined") return;
     const ref = document.referrer || "";
-    if (!/mercadopago\.com/i.test(ref)) return;
+    const fromMp = /mercadopago\.com/i.test(ref) || checkout === "success";
+    if (!fromMp) return;
     setShowActivated(true);
-    refreshBusiness?.();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (checkout !== "success") return;
-
-    setShowActivated(true);
-    let tries = 0;
-    const tick = async () => {
-      await refreshBusiness?.();
-      tries += 1;
-    };
-    tick();
-    const id = setInterval(() => {
-      if (tries >= 8) {
-        clearInterval(id);
-        return;
-      }
-      tick();
-    }, 2500);
-
-    const next = new URLSearchParams(searchParams);
-    next.delete("checkout");
-    setSearchParams(next, { replace: true });
-
-    return () => clearInterval(id);
-  }, [checkout]); // eslint-disable-line react-hooks/exhaustive-deps
+    syncSubscription();
+  }, [profile?.businessId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (sub.status === "active" && showActivated) {
@@ -242,7 +249,7 @@ export default function DashboardPage() {
             <p className="mt-1 text-sm text-emerald-100/80">
               {sub.status === "active"
                 ? "Tu suscripción de Ordino ya está activa. Stock y tienda desbloqueados."
-                : "Si Mercado Pago ya aprobó el pago, en unos segundos se actualiza el estado. Podés tocar Actualizar."}
+                : "Si Mercado Pago ya aprobó el pago, tocá Actualizar para sincronizar el estado."}
             </p>
           </section>
         )}
@@ -343,10 +350,11 @@ export default function DashboardPage() {
 
               <button
                 type="button"
-                onClick={() => refreshBusiness?.()}
-                className="rounded-xl border border-zinc-700 px-3 py-2 text-sm text-zinc-400 hover:text-zinc-200"
+                disabled={busy}
+                onClick={() => syncSubscription()}
+                className="rounded-xl border border-zinc-700 px-3 py-2 text-sm text-zinc-400 hover:text-zinc-200 disabled:opacity-60"
               >
-                Actualizar
+                {busy ? "Sincronizando…" : "Actualizar"}
               </button>
             </div>
           </div>
