@@ -1,60 +1,78 @@
-const admin = require("firebase-admin");
+/**
+ * Firebase Admin para Netlify Functions (CJS + API modular).
+ * Evita admin.credential.cert undefined con firebase-admin v12+.
+ */
+const { initializeApp, getApps, cert } = require("firebase-admin/app");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 
-function getAdmin() {
-  const apps = admin.apps;
-  const hasApp = Array.isArray(apps) ? apps.length > 0 : Boolean(admin.app?.length || false);
-
-  // firebase-admin v11+: admin.apps es un array; por las dudas no leemos .length si es undefined
-  let alreadyInit = false;
-  try {
-    alreadyInit = Array.isArray(admin.apps) && admin.apps.length > 0;
-  } catch {
-    alreadyInit = false;
+function parseServiceAccount() {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!raw) {
+    throw new Error("Falta FIREBASE_SERVICE_ACCOUNT (JSON del service account)");
   }
 
-  if (!alreadyInit) {
-    const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-    if (!raw) {
-      throw new Error("Falta FIREBASE_SERVICE_ACCOUNT (JSON del service account)");
+  let cred;
+  if (typeof raw !== "string") {
+    cred = raw;
+  } else {
+    try {
+      cred = JSON.parse(raw);
+    } catch {
+      // Netlify a veces guarda el JSON entrecomillado o con \\n
+      const unquoted = raw.trim().replace(/^"|"$/g, "");
+      cred = JSON.parse(unquoted);
     }
-    let cred = raw;
-    if (typeof raw === "string") {
-      try {
-        cred = JSON.parse(raw);
-      } catch {
-        cred = JSON.parse(raw.replace(/^"|"$/g, "").replace(/\\n/g, "\n"));
-      }
-    }
-    // private_key a veces llega con \\n literales
-    if (cred && typeof cred.private_key === "string") {
-      cred.private_key = cred.private_key.replace(/\\n/g, "\n");
-    }
-    admin.initializeApp({
-      credential: admin.credential.cert(cred),
-    });
   }
-  return admin;
+
+  if (!cred || typeof cred !== "object") {
+    throw new Error("FIREBASE_SERVICE_ACCOUNT no es un JSON válido");
+  }
+
+  if (typeof cred.private_key === "string") {
+    cred.private_key = cred.private_key.replace(/\\n/g, "\n");
+  }
+
+  if (!cred.client_email || !cred.private_key) {
+    throw new Error(
+      "FIREBASE_SERVICE_ACCOUNT incompleto (faltan client_email o private_key)"
+    );
+  }
+
+  return cred;
 }
 
-function getFirestore() {
-  return getAdmin().firestore();
+function ensureApp() {
+  const apps = getApps();
+  if (!apps.length) {
+    initializeApp({
+      credential: cert(parseServiceAccount()),
+    });
+  }
+}
+
+function getDb() {
+  ensureApp();
+  return getFirestore();
 }
 
 function serverTimestamp() {
-  return getAdmin().firestore.FieldValue.serverTimestamp();
+  return FieldValue.serverTimestamp();
 }
 
 async function updateBusiness(businessId, data) {
   if (!businessId) return;
-  await getFirestore()
+  await getDb()
     .collection("businesses")
     .doc(businessId)
     .set({ ...data, updatedAt: serverTimestamp() }, { merge: true });
 }
 
 module.exports = {
-  getAdmin,
-  getFirestore,
+  getAdmin: () => {
+    ensureApp();
+    return require("firebase-admin");
+  },
+  getFirestore: getDb,
   serverTimestamp,
   updateBusiness,
 };
