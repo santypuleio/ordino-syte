@@ -1,9 +1,7 @@
 /**
- * Sincroniza el estado de suscripción desde Mercado Pago → Firestore.
- * Útil cuando el webhook tarda o no llegó.
- *
- * POST { businessId }
- * Env: MP_ACCESS_TOKEN, FIREBASE_SERVICE_ACCOUNT
+ * Sincroniza suscripción MP → Firestore.
+ * POST { businessId, preapprovalId? }
+ * Si MP redirige a /dashboard?preapproval_id=…, pasar ese id.
  */
 const { getFirestore, updateBusiness } = require("./lib/firebaseAdmin.cjs");
 
@@ -59,11 +57,11 @@ async function applyPreapproval(businessId, pre) {
     mpStatus: pre.status || null,
   };
 
-  // A veces el cobro ya pasó y el semaphore está green aunque status tarde
+  const charged = Number(pre.summarized?.charged_quantity || 0);
   const looksPaid =
     mapped === "active" ||
     pre.summarized?.semaphore === "green" ||
-    (Number(pre.summarized?.charged_quantity) > 0 && pre.status !== "cancelled");
+    (charged > 0 && pre.status !== "cancelled" && pre.status !== "canceled");
 
   if (looksPaid && mapped !== "canceled") {
     Object.assign(patch, {
@@ -86,6 +84,14 @@ async function applyPreapproval(businessId, pre) {
           : new Date().toISOString(),
       graceEndsAt: null,
     });
+  } else if (pre.status === "pending" && pre.card_id) {
+    // Checkout completado con tarjeta, a veces queda pending un momento
+    Object.assign(patch, {
+      subscriptionStatus: "active",
+      graceEndsAt: null,
+      accessEndsAt: null,
+      currentPeriodEnd: pre.next_payment_date || null,
+    });
   }
 
   await updateBusiness(businessId, patch);
@@ -101,46 +107,52 @@ exports.handler = async (event) => {
     return json(405, { error: "Method not allowed" });
   }
 
-  if (!process.env.MP_ACCESS_TOKEN) {
-    return json(500, { error: "Falta MP_ACCESS_TOKEN" });
-  }
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-    return json(500, { error: "Falta FIREBASE_SERVICE_ACCOUNT" });
-  }
-
-  let payload;
   try {
-    payload = JSON.parse(event.body || "{}");
-  } catch {
-    return json(400, { error: "JSON inválido" });
-  }
+    if (!process.env.MP_ACCESS_TOKEN) {
+      return json(500, { error: "Falta MP_ACCESS_TOKEN" });
+    }
+    if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+      return json(500, { error: "Falta FIREBASE_SERVICE_ACCOUNT" });
+    }
 
-  const { businessId } = payload;
-  if (!businessId) return json(400, { error: "businessId es requerido" });
+    let payload;
+    try {
+      payload = JSON.parse(event.body || "{}");
+    } catch {
+      return json(400, { error: "JSON inválido" });
+    }
 
-  try {
+    const businessId = payload.businessId;
+    const preapprovalIdArg =
+      payload.preapprovalId ||
+      payload.preapproval_id ||
+      event.queryStringParameters?.preapproval_id ||
+      null;
+
+    if (!businessId) return json(400, { error: "businessId es requerido" });
+
     const snap = await getFirestore().collection("businesses").doc(businessId).get();
     if (!snap.exists) return json(404, { error: "Negocio no encontrado" });
     const biz = snap.data() || {};
 
-    const planId = biz.mpPreapprovalPlanId;
-    const preId = biz.mpPreapprovalId;
+    const planId = biz.mpPreapprovalPlanId || null;
+    const preId = preapprovalIdArg || biz.mpPreapprovalId || null;
 
-    let candidates = [];
+    const candidates = [];
 
     if (preId) {
       try {
-        candidates.push(await mpGet(`/preapproval/${preId}`));
+        candidates.push(await mpGet(`/preapproval/${encodeURIComponent(preId)}`));
       } catch (err) {
         console.warn("preapproval by id:", err.message);
       }
     }
 
-    // Buscar por plan o por external_reference (= businessId)
     const queries = [];
     if (planId) {
-      queries.push(`/preapproval/search?preapproval_plan_id=${encodeURIComponent(planId)}&status=authorized`);
-      queries.push(`/preapproval/search?preapproval_plan_id=${encodeURIComponent(planId)}`);
+      queries.push(
+        `/preapproval/search?preapproval_plan_id=${encodeURIComponent(planId)}`
+      );
     }
     queries.push(
       `/preapproval/search?external_reference=${encodeURIComponent(businessId)}`
@@ -149,34 +161,36 @@ exports.handler = async (event) => {
     for (const q of queries) {
       try {
         const search = await mpGet(q);
-        const results = Array.isArray(search.results) ? search.results : [];
-        candidates.push(...results);
+        const results = Array.isArray(search?.results) ? search.results : [];
+        for (const item of results) {
+          if (item?.id) candidates.push(item);
+        }
       } catch (err) {
         console.warn("search", q, err.message);
       }
     }
 
-    // Dedupar por id
     const byId = new Map();
     for (const pre of candidates) {
-      if (pre?.id) byId.set(pre.id, pre);
+      if (pre?.id) byId.set(String(pre.id), pre);
     }
-    const list = [...byId.values()];
+    const list = Array.from(byId.values());
 
     if (!list.length) {
       return json(200, {
         ok: false,
         found: false,
         message:
-          "No encontramos la suscripción en Mercado Pago todavía. Esperá unos segundos y reintentá, o revisá el webhook.",
-        planId: planId || null,
+          "No encontramos la suscripción en Mercado Pago todavía. Reintentá en unos segundos.",
+        triedPreapprovalId: preId,
+        planId,
       });
     }
 
-    // Preferir authorized / con cobros
     list.sort((a, b) => {
       const score = (p) =>
         (p.status === "authorized" ? 100 : 0) +
+        (p.card_id ? 40 : 0) +
         (p.summarized?.semaphore === "green" ? 50 : 0) +
         Number(p.summarized?.charged_quantity || 0) * 10;
       return score(b) - score(a);
@@ -192,9 +206,10 @@ exports.handler = async (event) => {
       message:
         applied.subscriptionStatus === "active"
           ? "Plan activado."
-          : `Suscripción en MP: ${best.status}. Si ya pagaste, puede demorar un momento.`,
+          : `Suscripción en MP: ${best.status}. Si ya pagaste, reintentá en unos segundos.`,
     });
   } catch (err) {
+    console.error("sync-mp-subscription", err);
     return json(500, { error: err.message || "Error sincronizando" });
   }
 };

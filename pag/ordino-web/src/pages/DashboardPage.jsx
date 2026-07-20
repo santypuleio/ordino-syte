@@ -34,20 +34,25 @@ export default function DashboardPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const fromExpired = searchParams.get("reason") === "trial_expired";
   const checkout = searchParams.get("checkout");
+  const preapprovalIdFromUrl =
+    searchParams.get("preapproval_id") || searchParams.get("preapprovalId") || "";
 
   const sub = useMemo(() => getSubscriptionState(business), [business]);
   const slug = business?.slug || profile?.businessId || "";
   const priceLabel = `USD ${PLAN_PRICE_USD} / mes`;
   const priceHint = `Equiv. ${formatArs(PLAN_PRICE_ARS)} · cobro vía Mercado Pago`;
 
-  async function syncSubscription() {
+  async function syncSubscription(preapprovalIdOverride) {
     setBillingMsg("");
     setBusy(true);
     try {
       const res = await fetch("/.netlify/functions/sync-mp-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ businessId: profile.businessId }),
+        body: JSON.stringify({
+          businessId: profile.businessId,
+          preapprovalId: preapprovalIdOverride || preapprovalIdFromUrl || undefined,
+        }),
       });
       const raw = await res.text();
       let data = {};
@@ -61,6 +66,12 @@ export default function DashboardPage() {
       if (data.subscriptionStatus === "active") {
         setShowActivated(true);
         setBillingMsg("");
+        if (preapprovalIdFromUrl) {
+          const next = new URLSearchParams(searchParams);
+          next.delete("preapproval_id");
+          next.delete("preapprovalId");
+          setSearchParams(next, { replace: true });
+        }
       } else {
         setBillingMsg(data.message || "Todavía no figura como activa en Mercado Pago.");
       }
@@ -71,16 +82,19 @@ export default function DashboardPage() {
     }
   }
 
-  // Al volver de MP, intentar sync (no solo leer Firestore)
+  // Al volver de MP (referrer o ?preapproval_id=), sincronizar
   useEffect(() => {
     if (!profile?.businessId) return;
     if (typeof document === "undefined") return;
     const ref = document.referrer || "";
-    const fromMp = /mercadopago\.com/i.test(ref) || checkout === "success";
+    const fromMp =
+      /mercadopago\.com/i.test(ref) ||
+      checkout === "success" ||
+      Boolean(preapprovalIdFromUrl);
     if (!fromMp) return;
     setShowActivated(true);
-    syncSubscription();
-  }, [profile?.businessId]); // eslint-disable-line react-hooks/exhaustive-deps
+    syncSubscription(preapprovalIdFromUrl || undefined);
+  }, [profile?.businessId, preapprovalIdFromUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (sub.status === "active" && showActivated) {
