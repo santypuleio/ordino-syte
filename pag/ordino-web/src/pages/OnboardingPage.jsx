@@ -127,8 +127,8 @@ export default function OnboardingPage() {
             Primer <span className="text-signal">mes gratis</span>
           </p>
           <p className="mt-1 text-sm text-zinc-300">
-            Después, <span className="font-semibold text-white">$7.500 ARS</span> / mes
-            <span className="text-zinc-500"> (equiv. USD 4.99)</span>.
+            Después, <span className="font-semibold text-white">USD 4.99</span> / mes
+            <span className="text-zinc-500"> (equiv. $7.500 ARS)</span>.
           </p>
           <p className="mt-2 text-xs text-zinc-500">
             Sin tarjeta para empezar. Tu stock y tienda se conservan si el trial vence.

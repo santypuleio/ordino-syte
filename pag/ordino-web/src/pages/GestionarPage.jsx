@@ -377,7 +377,7 @@ export default function GestionarPage() {
                   to="/dashboard"
                   className="text-xs text-zinc-500 hover:text-zinc-300"
                 >
-                  Después: $7.500 ARS / mes → Suscripción
+                  Después: USD 4.99 / mes → Suscripción
                 </Link>
               </div>
             ) : null}
@@ -392,7 +392,7 @@ export default function GestionarPage() {
                   className="text-sm font-semibold hover:opacity-90"
                   style={{ color: brand }}
                 >
-                  Activar plan $7.500 →
+                  Activar plan USD 4.99 →
                 </Link>
               </div>
             ) : null}

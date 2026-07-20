@@ -6,7 +6,15 @@ function getAdmin() {
     if (!raw) {
       throw new Error("Falta FIREBASE_SERVICE_ACCOUNT (JSON del service account)");
     }
-    const cred = typeof raw === "string" ? JSON.parse(raw) : raw;
+    let cred = raw;
+    if (typeof raw === "string") {
+      try {
+        cred = JSON.parse(raw);
+      } catch {
+        // A veces Netlify guarda el JSON con comillas escapadas de más
+        cred = JSON.parse(raw.replace(/^"|"$/g, "").replace(/\\n/g, "\n"));
+      }
+    }
     admin.initializeApp({
       credential: admin.credential.cert(cred),
     });

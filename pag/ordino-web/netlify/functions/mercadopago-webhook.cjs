@@ -5,7 +5,7 @@
  * Topics: subscription_preapproval, subscription_authorized_payment
  * Siempre re-fetch del recurso por id (no confiar solo en el body).
  */
-const { updateBusiness } = require("./lib/firebaseAdmin");
+const { updateBusiness } = require("./lib/firebaseAdmin.cjs");
 
 const GRACE_DAYS = 2;
 

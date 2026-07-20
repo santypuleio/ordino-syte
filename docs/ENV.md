@@ -29,6 +29,8 @@ Webhook Mercado Pago (Tus integraciones → Webhooks):
 
 `https://ordino-ar.netlify.app/.netlify/functions/mercadopago-webhook`
 
+(Functions en `.cjs` por compatibilidad con `"type": "module"` del frontend; la URL no cambia.)
+
 Topics recomendados:
 - `subscription_preapproval`
 - `subscription_authorized_payment`

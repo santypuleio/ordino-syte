@@ -80,16 +80,18 @@ exports.handler = async (event) => {
       return json(502, { error: "Mercado Pago no devolvió init_point", details: data });
     }
 
-    try {
-      const { updateBusiness } = require("./lib/firebaseAdmin");
-      await updateBusiness(businessId, {
-        mpPreapprovalId: data.id || null,
-        mpPayerEmail: email,
-        mpLastCheckoutAt: new Date().toISOString(),
-      });
-    } catch (err) {
-      // Checkout sigue válido aunque no podamos persistir el id aún
-      console.warn("No se pudo guardar mpPreapprovalId:", err.message);
+    // Persistencia best-effort (no bloquea el redirect al checkout)
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      try {
+        const { updateBusiness } = require("./lib/firebaseAdmin.cjs");
+        await updateBusiness(businessId, {
+          mpPreapprovalId: data.id || null,
+          mpPayerEmail: email,
+          mpLastCheckoutAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn("No se pudo guardar mpPreapprovalId:", err.message);
+      }
     }
 
     return json(200, {

@@ -37,8 +37,8 @@ export default function DashboardPage() {
 
   const sub = useMemo(() => getSubscriptionState(business), [business]);
   const slug = business?.slug || profile?.businessId || "";
-  const priceLabel = `${formatArs(PLAN_PRICE_ARS)} / mes`;
-  const priceHint = `Equiv. USD ${PLAN_PRICE_USD} · cobro en ARS vía Mercado Pago`;
+  const priceLabel = `USD ${PLAN_PRICE_USD} / mes`;
+  const priceHint = `Equiv. ${formatArs(PLAN_PRICE_ARS)} · cobro vía Mercado Pago`;
 
   useEffect(() => {
     if (checkout !== "success") return;
@@ -111,8 +111,17 @@ export default function DashboardPage() {
           uid: user.uid,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "No se pudo iniciar el pago");
+      const raw = await res.text();
+      let data = {};
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        throw new Error(
+          raw?.slice(0, 180) ||
+            `Error del servidor (${res.status}). Revisá MP_ACCESS_TOKEN y el deploy de Netlify.`
+        );
+      }
+      if (!res.ok) throw new Error(data.error || `No se pudo iniciar el pago (${res.status})`);
       if (data.url) window.location.href = data.url;
       else throw new Error("Respuesta inválida de Mercado Pago");
     } catch (err) {
@@ -302,7 +311,7 @@ export default function DashboardPage() {
                   onClick={startCheckout}
                   className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60"
                 >
-                  {busy ? "…" : `Activar plan · ${formatArs(PLAN_PRICE_ARS)}`}
+                  {busy ? "…" : `Activar plan · USD ${PLAN_PRICE_USD}`}
                 </button>
               ) : null}
 

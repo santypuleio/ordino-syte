@@ -3,7 +3,7 @@
  * Acceso en Ordino hasta fin de período (accessEndsAt / next_payment_date).
  * Env: MP_ACCESS_TOKEN, FIREBASE_SERVICE_ACCOUNT
  */
-const { getFirestore, updateBusiness } = require("./lib/firebaseAdmin");
+const { getFirestore, updateBusiness } = require("./lib/firebaseAdmin.cjs");
 
 function json(statusCode, body) {
   return {
