@@ -40,6 +40,16 @@ export default function DashboardPage() {
   const priceLabel = `USD ${PLAN_PRICE_USD} / mes`;
   const priceHint = `Equiv. ${formatArs(PLAN_PRICE_ARS)} · cobro vía Mercado Pago`;
 
+  // Si vuelven de MP sin ?checkout=success, igual refrescamos una vez
+  useEffect(() => {
+    if (checkout === "success") return;
+    if (typeof document === "undefined") return;
+    const ref = document.referrer || "";
+    if (!/mercadopago\.com/i.test(ref)) return;
+    setShowActivated(true);
+    refreshBusiness?.();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (checkout !== "success") return;
 

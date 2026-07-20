@@ -1,17 +1,9 @@
 /**
  * Crea una suscripción Mercado Pago (preapproval pending) y devuelve init_point.
  *
- * Env:
- * - MP_ACCESS_TOKEN
- * - MP_AMOUNT_ARS (default 7500)
- * - URL
- * Test (suscripciones):
- *   MP NO deja probar Suscripciones bien con el Access Token TEST- de la app real.
- *   Creá una cuenta de prueba tipo VENDEDOR → usá su Access Token (APP_USR-…).
- *   Creá un COMPRADOR → MP_TEST_USER_ID = su User ID numérico.
- * - MP_TEST_USER_ID
- * - MP_TEST_PAYER_EMAIL (override)
- * - MP_MODE=test
+ * Env: MP_ACCESS_TOKEN, MP_AMOUNT_ARS, URL
+ * Test: MP_TEST_USER_ID (User ID comprador), MP_TEST_PAYER_EMAIL, MP_MODE
+ * Opcional: MP_PREAPPROVAL_PLAN_ID (si ya creaste un plan)
  */
 function json(statusCode, body) {
   return {
@@ -28,21 +20,31 @@ function resolveTestPayerEmail() {
   if (userId && /^\d+$/.test(userId)) {
     return `test_user_${userId}@testuser.com`;
   }
-
   if (!explicit) return "";
-
   const lower = explicit.toLowerCase();
   if (lower.endsWith("@testuser.com")) return lower;
-
-  if (/^\d+$/.test(explicit)) {
-    return `test_user_${explicit}@testuser.com`;
-  }
-
-  if (/^testuser\d+$/i.test(explicit)) {
-    return `${explicit}@testuser.com`.toLowerCase();
-  }
-
+  if (/^\d+$/.test(explicit)) return `test_user_${explicit}@testuser.com`;
+  if (/^testuser\d+$/i.test(explicit)) return `${explicit}@testuser.com`.toLowerCase();
   return explicit;
+}
+
+async function mpPost(token, path, body) {
+  const res = await fetch(`https://api.mercadopago.com${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { res, data };
+}
+
+function yearsFromNow(years) {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() + years);
+  return d.toISOString();
 }
 
 exports.handler = async (event) => {
@@ -54,15 +56,9 @@ exports.handler = async (event) => {
   const amount = Number(process.env.MP_AMOUNT_ARS || 7500);
   const siteUrl = (process.env.URL || process.env.DEPLOY_PRIME_URL || "").replace(/\/$/, "");
 
-  if (!token) {
-    return json(500, { error: "Falta MP_ACCESS_TOKEN en Netlify." });
-  }
-  if (!siteUrl) {
-    return json(500, { error: "Falta URL del sitio para el back_url de Mercado Pago." });
-  }
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return json(500, { error: "MP_AMOUNT_ARS inválido." });
-  }
+  if (!token) return json(500, { error: "Falta MP_ACCESS_TOKEN en Netlify." });
+  if (!siteUrl) return json(500, { error: "Falta URL del sitio para el back_url de Mercado Pago." });
+  if (!Number.isFinite(amount) || amount <= 0) return json(500, { error: "MP_AMOUNT_ARS inválido." });
 
   let payload;
   try {
@@ -90,68 +86,80 @@ exports.handler = async (event) => {
 
   if (forceTest && !testPayerEmail) {
     return json(500, {
-      error:
-        "Modo prueba: poné MP_TEST_USER_ID = User ID del comprador de prueba (solo números).",
+      error: "Modo prueba: poné MP_TEST_USER_ID = User ID del comprador (solo números).",
     });
   }
 
-  // Suscripciones: el token TEST- de la app real suele dar PA_UNAUTHORIZED.
-  // Mejor: Access Token APP_USR de una cuenta de prueba tipo Vendedor.
-  if (isTestToken) {
-    console.warn(
-      "MP: usando token TEST-. Suscripciones suele requerir APP_USR de vendedor de prueba."
-    );
-  }
+  const backUrl = `${siteUrl}/dashboard`;
 
   try {
-    const body = {
+    // 1) Plan (reutilizar env o crear uno)
+    let planId = String(process.env.MP_PREAPPROVAL_PLAN_ID || "").trim() || null;
+    if (!planId) {
+      const planBody = {
+        reason: "Ordino plan mensual",
+        back_url: backUrl,
+        auto_recurring: {
+          frequency: 1,
+          frequency_type: "months",
+          transaction_amount: amount,
+          currency_id: "ARS",
+        },
+      };
+      const { res: planRes, data: planData } = await mpPost(token, "/preapproval_plan", planBody);
+      if (!planRes.ok) {
+        return json(502, {
+          error:
+            planData?.message ||
+            planData?.error ||
+            `No se pudo crear el plan MP (${planRes.status})`,
+          mpStatus: planRes.status,
+          details: planData,
+          step: "preapproval_plan",
+          tokenKind: isTestToken ? "TEST" : "APP_USR_or_other",
+        });
+      }
+      planId = planData.id;
+    }
+
+    // 2) Suscripción pending ligada al plan
+    const subBody = {
+      preapproval_plan_id: planId,
       reason: "Ordino plan mensual",
       external_reference: String(businessId),
       payer_email: payerEmail,
-      back_url: `${siteUrl}/dashboard?checkout=success`,
+      back_url: backUrl,
       status: "pending",
       auto_recurring: {
         frequency: 1,
         frequency_type: "months",
+        start_date: new Date().toISOString(),
+        end_date: yearsFromNow(5),
         transaction_amount: amount,
         currency_id: "ARS",
       },
     };
 
-    const res = await fetch("https://api.mercadopago.com/preapproval", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
+    let { res, data } = await mpPost(token, "/preapproval", subBody);
 
-    const data = await res.json().catch(() => ({}));
+    // Retry sin fechas si MP se queja / 500
+    if (!res.ok && (res.status >= 500 || String(data?.message || "").includes("Internal"))) {
+      delete subBody.auto_recurring.start_date;
+      delete subBody.auto_recurring.end_date;
+      ({ res, data } = await mpPost(token, "/preapproval", subBody));
+    }
+
     if (!res.ok) {
       const cause = Array.isArray(data?.cause) ? data.cause : [];
       const causeMsg = cause
         .map((c) => c?.description || c?.code || c?.message)
         .filter(Boolean)
         .join(" | ");
-      let msg =
-        causeMsg ||
-        data?.message ||
-        data?.error ||
-        `Mercado Pago error ${res.status}`;
+      let msg = causeMsg || data?.message || data?.error || `Mercado Pago error ${res.status}`;
 
-      if (
-        data?.code === "PA_UNAUTHORIZED_RESULT_FROM_POLICIES" ||
-        String(msg).toLowerCase().includes("unauthorized")
-      ) {
+      if (data?.code === "PA_UNAUTHORIZED_RESULT_FROM_POLICIES") {
         msg +=
-          " | Para Suscripciones: creá cuenta de prueba VENDEDOR, usá su Access Token APP_USR (no el TEST- de tu app), y MP_TEST_USER_ID del COMPRADOR.";
-      } else if (
-        String(msg).toLowerCase().includes("payer") &&
-        String(msg).toLowerCase().includes("collector")
-      ) {
-        msg +=
-          " | Vendedor y comprador deben ser ambos de prueba o ambos reales. Revisá MP_TEST_USER_ID.";
+          " | Usá APP_USR del vendedor de prueba + MP_TEST_USER_ID del comprador.";
       }
 
       return json(502, {
@@ -159,6 +167,8 @@ exports.handler = async (event) => {
         mpStatus: res.status,
         details: data,
         payerEmailUsed: payerEmail,
+        planId,
+        step: "preapproval",
         tokenKind: isTestToken ? "TEST" : "APP_USR_or_other",
       });
     }
@@ -173,6 +183,7 @@ exports.handler = async (event) => {
         const { updateBusiness } = require("./lib/firebaseAdmin.cjs");
         await updateBusiness(businessId, {
           mpPreapprovalId: data.id || null,
+          mpPreapprovalPlanId: planId,
           mpPayerEmail: payerEmail,
           mpLastCheckoutAt: new Date().toISOString(),
         });
@@ -184,6 +195,7 @@ exports.handler = async (event) => {
     return json(200, {
       url: initPoint,
       id: data.id,
+      planId,
       status: data.status,
       testMode: Boolean(data.sandbox_init_point) || forceTest,
       payerEmailUsed: payerEmail,
