@@ -5,9 +5,12 @@
  * - MP_ACCESS_TOKEN
  * - MP_AMOUNT_ARS (default 7500)
  * - URL
- * Test:
- * - MP_TEST_USER_ID  → arma test_user_{id}@testuser.com (recomendado)
- * - MP_TEST_PAYER_EMAIL → override manual del email
+ * Test (suscripciones):
+ *   MP NO deja probar Suscripciones bien con el Access Token TEST- de la app real.
+ *   Creá una cuenta de prueba tipo VENDEDOR → usá su Access Token (APP_USR-…).
+ *   Creá un COMPRADOR → MP_TEST_USER_ID = su User ID numérico.
+ * - MP_TEST_USER_ID
+ * - MP_TEST_PAYER_EMAIL (override)
  * - MP_MODE=test
  */
 function json(statusCode, body) {
@@ -28,16 +31,13 @@ function resolveTestPayerEmail() {
 
   if (!explicit) return "";
 
-  // Normalizar errores comunes al copiar el Usuario TESTUSER…
   const lower = explicit.toLowerCase();
   if (lower.endsWith("@testuser.com")) return lower;
 
-  // Si pegaron solo el User ID
   if (/^\d+$/.test(explicit)) {
     return `test_user_${explicit}@testuser.com`;
   }
 
-  // Si pegaron TESTUSER123… sin @
   if (/^testuser\d+$/i.test(explicit)) {
     return `${explicit}@testuser.com`.toLowerCase();
   }
@@ -77,10 +77,13 @@ exports.handler = async (event) => {
   }
 
   const isTestToken = String(token).startsWith("TEST-");
+  const hasTestPayerConfig = Boolean(
+    process.env.MP_TEST_USER_ID || process.env.MP_TEST_PAYER_EMAIL
+  );
   const forceTest =
     isTestToken ||
     String(process.env.MP_MODE || "").toLowerCase() === "test" ||
-    Boolean(process.env.MP_TEST_USER_ID || process.env.MP_TEST_PAYER_EMAIL);
+    hasTestPayerConfig;
 
   const testPayerEmail = resolveTestPayerEmail();
   const payerEmail = forceTest && testPayerEmail ? testPayerEmail : String(email);
@@ -88,8 +91,16 @@ exports.handler = async (event) => {
   if (forceTest && !testPayerEmail) {
     return json(500, {
       error:
-        "Modo prueba: en Netlify poné MP_TEST_USER_ID = User ID numérico del comprador de prueba (ej. 3248032089). Eso arma test_user_{id}@testuser.com.",
+        "Modo prueba: poné MP_TEST_USER_ID = User ID del comprador de prueba (solo números).",
     });
+  }
+
+  // Suscripciones: el token TEST- de la app real suele dar PA_UNAUTHORIZED.
+  // Mejor: Access Token APP_USR de una cuenta de prueba tipo Vendedor.
+  if (isTestToken) {
+    console.warn(
+      "MP: usando token TEST-. Suscripciones suele requerir APP_USR de vendedor de prueba."
+    );
   }
 
   try {
@@ -107,18 +118,12 @@ exports.handler = async (event) => {
       },
     };
 
-    const headers = {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    };
-    // Requerido por MP en varias APIs de sandbox con token TEST-
-    if (isTestToken || forceTest) {
-      headers["X-Scope"] = "stage";
-    }
-
     const res = await fetch("https://api.mercadopago.com/preapproval", {
       method: "POST",
-      headers,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(body),
     });
 
@@ -129,23 +134,32 @@ exports.handler = async (event) => {
         .map((c) => c?.description || c?.code || c?.message)
         .filter(Boolean)
         .join(" | ");
-      const msg =
+      let msg =
         causeMsg ||
         data?.message ||
         data?.error ||
         `Mercado Pago error ${res.status}`;
 
-      let hint = "";
-      if (String(msg).toLowerCase().includes("payer") && String(msg).toLowerCase().includes("collector")) {
-        hint =
-          " Usá MP_TEST_USER_ID = User ID del comprador (número de la tarjeta de prueba), no el nombre TESTUSER….";
+      if (
+        data?.code === "PA_UNAUTHORIZED_RESULT_FROM_POLICIES" ||
+        String(msg).toLowerCase().includes("unauthorized")
+      ) {
+        msg +=
+          " | Para Suscripciones: creá cuenta de prueba VENDEDOR, usá su Access Token APP_USR (no el TEST- de tu app), y MP_TEST_USER_ID del COMPRADOR.";
+      } else if (
+        String(msg).toLowerCase().includes("payer") &&
+        String(msg).toLowerCase().includes("collector")
+      ) {
+        msg +=
+          " | Vendedor y comprador deben ser ambos de prueba o ambos reales. Revisá MP_TEST_USER_ID.";
       }
 
       return json(502, {
-        error: msg + hint,
+        error: msg,
         mpStatus: res.status,
         details: data,
         payerEmailUsed: payerEmail,
+        tokenKind: isTestToken ? "TEST" : "APP_USR_or_other",
       });
     }
 
@@ -171,7 +185,7 @@ exports.handler = async (event) => {
       url: initPoint,
       id: data.id,
       status: data.status,
-      testMode: Boolean(data.sandbox_init_point) || isTestToken,
+      testMode: Boolean(data.sandbox_init_point) || forceTest,
       payerEmailUsed: payerEmail,
     });
   } catch (err) {

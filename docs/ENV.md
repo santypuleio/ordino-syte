@@ -28,7 +28,12 @@ URL=https://ordino-ar.netlify.app
 FIREBASE_SERVICE_ACCOUNT= # JSON completo del service account (una sola línea)
 ```
 
-**Importante (pruebas):** no uses el nombre `TESTUSER…` como email. En la tarjeta del comprador copiá el **User ID** (solo números) → `MP_TEST_USER_ID`. El backend arma `test_user_{id}@testuser.com`.
+**Importante (pruebas de Suscripciones):** el Access Token `TEST-…` de tu app real suele devolver `PA_UNAUTHORIZED`. Lo que funciona:
+
+1. Creá una cuenta de prueba tipo **Vendedor**.
+2. En esa cuenta, obtené / usá su **Access Token** (empieza con `APP_USR-…`, credenciales de esa cuenta de prueba).
+3. Creá un **Comprador** de prueba → `MP_TEST_USER_ID` = su User ID.
+4. `MP_ACCESS_TOKEN` = el `APP_USR` del vendedor de prueba (no el `TEST-` de tu usuario real).
 
 Webhook Mercado Pago (Tus integraciones → Webhooks):
 
