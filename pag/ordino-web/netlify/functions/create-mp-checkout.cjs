@@ -2,8 +2,7 @@
  * Crea una suscripción Mercado Pago (preapproval pending) y devuelve init_point.
  *
  * Env: MP_ACCESS_TOKEN, MP_AMOUNT_ARS, URL
- * Test: MP_TEST_USER_ID (User ID comprador), MP_TEST_PAYER_EMAIL, MP_MODE
- * Opcional: MP_PREAPPROVAL_PLAN_ID (si ya creaste un plan)
+ * Test: MP_TEST_USER_ID, MP_TEST_PAYER_EMAIL, MP_MODE
  */
 function json(statusCode, body) {
   return {
@@ -41,10 +40,17 @@ async function mpPost(token, path, body) {
   return { res, data };
 }
 
-function yearsFromNow(years) {
-  const d = new Date();
-  d.setFullYear(d.getFullYear() + years);
-  return d.toISOString();
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function formatMpError(data, status) {
+  const cause = Array.isArray(data?.cause) ? data.cause : [];
+  const causeMsg = cause
+    .map((c) => c?.description || c?.code || c?.message)
+    .filter(Boolean)
+    .join(" | ");
+  return causeMsg || data?.message || data?.error || `Mercado Pago error ${status}`;
 }
 
 exports.handler = async (event) => {
@@ -91,11 +97,29 @@ exports.handler = async (event) => {
   }
 
   const backUrl = `${siteUrl}/dashboard`;
+  const tokenKind = isTestToken ? "TEST" : "APP_USR_or_other";
 
   try {
-    // 1) Plan (reutilizar env o crear uno)
-    let planId = String(process.env.MP_PREAPPROVAL_PLAN_ID || "").trim() || null;
-    if (!planId) {
+    // A) Preferir suscripción SIN plan (flujo "pending" documentado por MP)
+    const withoutPlan = {
+      reason: "Ordino plan mensual",
+      external_reference: String(businessId),
+      payer_email: payerEmail,
+      back_url: backUrl,
+      status: "pending",
+      auto_recurring: {
+        frequency: 1,
+        frequency_type: "months",
+        transaction_amount: amount,
+        currency_id: "ARS",
+      },
+    };
+
+    let { res, data } = await mpPost(token, "/preapproval", withoutPlan);
+    let mode = "without_plan";
+
+    // B) Si falla, crear plan y suscribir SOLO con preapproval_plan_id (sin auto_recurring)
+    if (!res.ok) {
       const planBody = {
         reason: "Ordino plan mensual",
         back_url: backUrl,
@@ -106,76 +130,56 @@ exports.handler = async (event) => {
           currency_id: "ARS",
         },
       };
-      const { res: planRes, data: planData } = await mpPost(token, "/preapproval_plan", planBody);
-      if (!planRes.ok) {
+      const planResult = await mpPost(token, "/preapproval_plan", planBody);
+      if (!planResult.res.ok) {
         return json(502, {
-          error:
-            planData?.message ||
-            planData?.error ||
-            `No se pudo crear el plan MP (${planRes.status})`,
-          mpStatus: planRes.status,
-          details: planData,
-          step: "preapproval_plan",
-          tokenKind: isTestToken ? "TEST" : "APP_USR_or_other",
+          error: formatMpError(data, res.status),
+          mpStatus: res.status,
+          details: { withoutPlan: data, plan: planResult.data },
+          payerEmailUsed: payerEmail,
+          step: "without_plan_and_plan",
+          tokenKind,
         });
       }
-      planId = planData.id;
-    }
 
-    // 2) Suscripción pending ligada al plan
-    const subBody = {
-      preapproval_plan_id: planId,
-      reason: "Ordino plan mensual",
-      external_reference: String(businessId),
-      payer_email: payerEmail,
-      back_url: backUrl,
-      status: "pending",
-      auto_recurring: {
-        frequency: 1,
-        frequency_type: "months",
-        start_date: new Date().toISOString(),
-        end_date: yearsFromNow(5),
-        transaction_amount: amount,
-        currency_id: "ARS",
-      },
-    };
+      const planId = planResult.data.id;
+      await sleep(1500);
 
-    let { res, data } = await mpPost(token, "/preapproval", subBody);
+      const withPlan = {
+        preapproval_plan_id: planId,
+        reason: "Ordino plan mensual",
+        external_reference: String(businessId),
+        payer_email: payerEmail,
+        back_url: backUrl,
+        status: "pending",
+      };
 
-    // Retry sin fechas si MP se queja / 500
-    if (!res.ok && (res.status >= 500 || String(data?.message || "").includes("Internal"))) {
-      delete subBody.auto_recurring.start_date;
-      delete subBody.auto_recurring.end_date;
-      ({ res, data } = await mpPost(token, "/preapproval", subBody));
-    }
+      ({ res, data } = await mpPost(token, "/preapproval", withPlan));
+      mode = "with_plan";
 
-    if (!res.ok) {
-      const cause = Array.isArray(data?.cause) ? data.cause : [];
-      const causeMsg = cause
-        .map((c) => c?.description || c?.code || c?.message)
-        .filter(Boolean)
-        .join(" | ");
-      let msg = causeMsg || data?.message || data?.error || `Mercado Pago error ${res.status}`;
-
-      if (data?.code === "PA_UNAUTHORIZED_RESULT_FROM_POLICIES") {
-        msg +=
-          " | Usá APP_USR del vendedor de prueba + MP_TEST_USER_ID del comprador.";
+      if (!res.ok) {
+        return json(502, {
+          error: formatMpError(data, res.status),
+          mpStatus: res.status,
+          details: data,
+          payerEmailUsed: payerEmail,
+          planId,
+          step: "preapproval_with_plan",
+          tokenKind,
+          firstError: withoutPlan ? formatMpError : undefined,
+        });
       }
 
-      return json(502, {
-        error: msg,
-        mpStatus: res.status,
-        details: data,
-        payerEmailUsed: payerEmail,
-        planId,
-        step: "preapproval",
-        tokenKind: isTestToken ? "TEST" : "APP_USR_or_other",
-      });
+      data._planId = planId;
     }
 
     const initPoint = data.sandbox_init_point || data.init_point;
     if (!initPoint) {
-      return json(502, { error: "Mercado Pago no devolvió init_point", details: data });
+      return json(502, {
+        error: "Mercado Pago no devolvió init_point",
+        details: data,
+        step: mode,
+      });
     }
 
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
@@ -183,7 +187,7 @@ exports.handler = async (event) => {
         const { updateBusiness } = require("./lib/firebaseAdmin.cjs");
         await updateBusiness(businessId, {
           mpPreapprovalId: data.id || null,
-          mpPreapprovalPlanId: planId,
+          mpPreapprovalPlanId: data._planId || null,
           mpPayerEmail: payerEmail,
           mpLastCheckoutAt: new Date().toISOString(),
         });
@@ -195,8 +199,8 @@ exports.handler = async (event) => {
     return json(200, {
       url: initPoint,
       id: data.id,
-      planId,
       status: data.status,
+      mode,
       testMode: Boolean(data.sandbox_init_point) || forceTest,
       payerEmailUsed: payerEmail,
     });
