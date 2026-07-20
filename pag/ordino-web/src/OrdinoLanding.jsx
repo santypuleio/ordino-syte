@@ -189,12 +189,13 @@ export default function OrdinoLanding() {
                 Trial + plan
               </div>
               <div className="mt-4 font-display text-5xl font-extrabold text-white">
-                USD 4.99
-                <span className="text-lg font-medium text-zinc-500"> / mes</span>
+                $7.500
+                <span className="text-lg font-medium text-zinc-500"> ARS / mes</span>
               </div>
               <p className="mt-3 text-sm text-zinc-400">
-                Los primeros <strong className="text-zinc-200">2 meses gratis</strong>. Después,
-                USD 4.99 al mes. Stock + ecommerce incluidos.
+                Los primeros <strong className="text-zinc-200">30 días gratis</strong>. Después,
+                equiv. USD 4.99 (hoy $7.500 ARS). Stock + ecommerce incluidos. Pago con Mercado
+                Pago.
               </p>
               <Link
                 to={loggedIn ? "/gestionar" : "/register"}

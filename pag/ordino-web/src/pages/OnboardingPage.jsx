@@ -124,10 +124,11 @@ export default function OnboardingPage() {
             Plan Ordino
           </div>
           <p className="mt-2 text-base font-semibold text-white sm:text-lg">
-            Primeros <span className="text-signal">2 meses gratis</span>
+            Primer <span className="text-signal">mes gratis</span>
           </p>
           <p className="mt-1 text-sm text-zinc-300">
-            Después, <span className="font-semibold text-white">USD 4.99</span> por mes.
+            Después, <span className="font-semibold text-white">$7.500 ARS</span> / mes
+            <span className="text-zinc-500"> (equiv. USD 4.99)</span>.
           </p>
           <p className="mt-2 text-xs text-zinc-500">
             Sin tarjeta para empezar. Tu stock y tienda se conservan si el trial vence.

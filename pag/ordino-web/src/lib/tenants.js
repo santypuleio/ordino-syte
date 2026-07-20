@@ -7,14 +7,20 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase";
 
-export const TRIAL_DAYS = 60;
+/** Trial Ordino: 1 mes */
+export const TRIAL_DAYS = 30;
+/** Días de gracia tras cobro fallido */
+export const GRACE_DAYS = 2;
+/** Precio de lista (referencia) y cobro local */
+export const PLAN_PRICE_USD = 4.99;
+export const PLAN_PRICE_ARS = 7500;
 
 export const STOCK_APP_URL = (
-  import.meta.env.VITE_STOCK_APP_URL || "https://ordino-gestorstock.netlify.app"
+  import.meta.env.VITE_STOCK_APP_URL || "https://ordino-ar-stock.netlify.app"
 ).replace(/\/$/, "");
 
 export const ECOMMERCE_APP_URL = (
-  import.meta.env.VITE_ECOMMERCE_APP_URL || "https://ordino-importados.netlify.app"
+  import.meta.env.VITE_ECOMMERCE_APP_URL || "https://ordino-ar-shop.netlify.app"
 ).replace(/\/$/, "");
 
 export function slugify(input) {
@@ -45,6 +51,18 @@ export function trialEndsAtFrom(date = new Date()) {
   return d;
 }
 
+function toDate(value) {
+  if (!value) return null;
+  if (typeof value.toDate === "function") return value.toDate();
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function daysUntil(date, now = new Date()) {
+  if (!date) return null;
+  return Math.max(0, Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+}
+
 export function getSubscriptionState(business) {
   if (!business) {
     return {
@@ -53,42 +71,96 @@ export function getSubscriptionState(business) {
       label: "Sin negocio",
       trialEndsAt: null,
       daysLeft: null,
+      graceEndsAt: null,
+      accessEndsAt: null,
     };
   }
 
   const status = business.subscriptionStatus || "trial";
-  const trialEndsAt = business.trialEndsAt?.toDate
-    ? business.trialEndsAt.toDate()
-    : business.trialEndsAt
-      ? new Date(business.trialEndsAt)
-      : null;
-
+  const trialEndsAt = toDate(business.trialEndsAt);
+  const graceEndsAt = toDate(business.graceEndsAt);
+  const accessEndsAt = toDate(business.accessEndsAt || business.currentPeriodEnd);
   const now = new Date();
   const trialValid = trialEndsAt ? trialEndsAt > now : false;
-  const daysLeft =
-    trialEndsAt != null
-      ? Math.max(0, Math.ceil((trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
-      : null;
+  const daysLeft = daysUntil(trialEndsAt, now);
 
   if (status === "active") {
-    return { status, active: true, label: "Activo", trialEndsAt, daysLeft: null };
-  }
-  if (status === "trial" && trialValid) {
-    return { status: "trial", active: true, label: "Prueba gratis", trialEndsAt, daysLeft };
-  }
-  if (status === "past_due") {
-    return { status, active: false, label: "Pago pendiente", trialEndsAt, daysLeft: 0 };
-  }
-  if (status === "canceled" || (status === "trial" && !trialValid)) {
     return {
-      status: status === "trial" ? "trial_expired" : status,
+      status,
+      active: true,
+      label: "Activo",
+      trialEndsAt,
+      daysLeft: null,
+      graceEndsAt,
+      accessEndsAt,
+    };
+  }
+
+  if (status === "trial" && trialValid) {
+    return {
+      status: "trial",
+      active: true,
+      label: "Prueba gratis",
+      trialEndsAt,
+      daysLeft,
+      graceEndsAt,
+      accessEndsAt,
+    };
+  }
+
+  if (status === "past_due") {
+    const inGrace = graceEndsAt ? graceEndsAt > now : false;
+    const graceDaysLeft = daysUntil(graceEndsAt, now);
+    return {
+      status: "past_due",
+      active: inGrace,
+      label: inGrace
+        ? graceDaysLeft === 1
+          ? "Pago pendiente — 1 día de gracia"
+          : `Pago pendiente — ${graceDaysLeft} días de gracia`
+        : "Pago pendiente",
+      trialEndsAt,
+      daysLeft: 0,
+      graceEndsAt,
+      accessEndsAt,
+      graceDaysLeft,
+    };
+  }
+
+  if (status === "canceled") {
+    const stillAccess = accessEndsAt ? accessEndsAt > now : false;
+    return {
+      status: "canceled",
+      active: stillAccess,
+      label: stillAccess ? "Cancelada — acceso hasta fin de período" : "Suscripción cancelada",
+      trialEndsAt,
+      daysLeft: 0,
+      graceEndsAt,
+      accessEndsAt,
+    };
+  }
+
+  if (status === "trial" && !trialValid) {
+    return {
+      status: "trial_expired",
       active: false,
       label: "Suscripción vencida",
       trialEndsAt,
       daysLeft: 0,
+      graceEndsAt,
+      accessEndsAt,
     };
   }
-  return { status, active: false, label: status, trialEndsAt, daysLeft };
+
+  return {
+    status,
+    active: false,
+    label: status,
+    trialEndsAt,
+    daysLeft,
+    graceEndsAt,
+    accessEndsAt,
+  };
 }
 
 export async function isSlugAvailable(slug) {
@@ -219,6 +291,9 @@ export async function provisionTenant({
       whatsapp: whatsapp || "",
       subscriptionStatus: "trial",
       trialEndsAt,
+      mpPreapprovalId: null,
+      graceEndsAt: null,
+      accessEndsAt: null,
       stripeCustomerId: null,
       stripeSubscriptionId: null,
       createdAt: serverTimestamp(),

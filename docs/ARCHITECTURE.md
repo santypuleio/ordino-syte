@@ -34,7 +34,9 @@ businesses/{businessId}          # businessId === slug (v1)
   name, slug, ownerId, ownerEmail
   logoUrl, primaryColor, accentColor, whatsapp
   subscriptionStatus: trial|active|past_due|canceled
-  trialEndsAt, stripeCustomerId, stripeSubscriptionId
+  trialEndsAt, mpPreapprovalId, graceEndsAt, accessEndsAt
+  (legacy: stripeCustomerId, stripeSubscriptionId)
+
   createdAt, updatedAt
   products/{productId}           # fuente única stock ↔ ecommerce
   sales/{saleId}
@@ -55,10 +57,12 @@ tenants/{businessId}/logo/{filename}
 
 ## Billing (Fase 4)
 
-- Trial: 60 días desde `createdAt` / `trialEndsAt`.
-- Luego USD 5/mes vía Stripe Checkout + Customer Portal.
-- Webhook Netlify Function actualiza `subscriptionStatus`.
-- Gateo: stock en solo lectura si trial vencido y no `active`; ecommerce público sigue visible con banner.
+- Trial: 30 días desde `trialEndsAt`.
+- Precio: $7.500 ARS/mes (equiv. USD 4.99) vía Mercado Pago.
+- Cobro fallido: 2 días de gracia (`graceEndsAt`), después bloqueo.
+- Cancelación: acceso hasta `accessEndsAt` (fin de período).
+- Webhook Netlify Function (`mercadopago-webhook`) actualiza `subscriptionStatus`.
+- Gateo: stock redirige a dashboard si no hay acceso; ecommerce puede mostrar banner.
 
 ## Checklist por fases
 
