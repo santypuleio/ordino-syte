@@ -1,6 +1,7 @@
 /**
  * Crea una suscripción Mercado Pago (preapproval pending) y devuelve init_point.
  * Env: MP_ACCESS_TOKEN, MP_AMOUNT_ARS (default 7500), URL
+ * Test: MP_TEST_PAYER_EMAIL (email del comprador de prueba), MP_MODE=test (opcional)
  */
 function json(statusCode, body) {
   return {
@@ -36,16 +37,33 @@ exports.handler = async (event) => {
     return json(400, { error: "JSON inválido" });
   }
 
-  const { businessId, email, uid } = payload;
+  const { businessId, email } = payload;
   if (!businessId || !email) {
     return json(400, { error: "businessId y email son requeridos" });
+  }
+
+  // En sandbox, payer_email DEBE ser el email del usuario comprador de prueba
+  // (test_user_…@testuser.com). Si mandamos el Gmail de Ordino y pagás con
+  // otra cuenta, MP deja Confirmar deshabilitado / rechaza el pago.
+  const testPayerEmail = String(process.env.MP_TEST_PAYER_EMAIL || "").trim();
+  const forceTest =
+    String(token).startsWith("TEST-") ||
+    String(process.env.MP_MODE || "").toLowerCase() === "test" ||
+    Boolean(testPayerEmail);
+  const payerEmail = forceTest && testPayerEmail ? testPayerEmail : String(email);
+
+  if (forceTest && !testPayerEmail) {
+    return json(500, {
+      error:
+        "Modo prueba: agregá en Netlify MP_TEST_PAYER_EMAIL con el email del comprador de prueba (Cuentas de prueba → Comprador).",
+    });
   }
 
   try {
     const body = {
       reason: "Ordino — plan mensual",
       external_reference: String(businessId),
-      payer_email: String(email),
+      payer_email: payerEmail,
       back_url: `${siteUrl}/dashboard?checkout=success`,
       status: "pending",
       auto_recurring: {
@@ -75,25 +93,19 @@ exports.handler = async (event) => {
       return json(502, { error: msg, details: data });
     }
 
-    // Test token → siempre sandbox. Prod token → init_point real.
-    // Mezclar ambos da el error: "Una de las partes ... es de prueba".
-    const isTestToken =
-      String(token).startsWith("TEST-") ||
-      String(process.env.MP_MODE || "").toLowerCase() === "test";
-    const initPoint = isTestToken
-      ? data.sandbox_init_point || data.init_point
-      : data.init_point || data.sandbox_init_point;
+    // Si existe sandbox_init_point, usarlo (credenciales de prueba).
+    // En producción suele venir solo init_point.
+    const initPoint = data.sandbox_init_point || data.init_point;
     if (!initPoint) {
       return json(502, { error: "Mercado Pago no devolvió init_point", details: data });
     }
 
-    // Persistencia best-effort (no bloquea el redirect al checkout)
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       try {
         const { updateBusiness } = require("./lib/firebaseAdmin.cjs");
         await updateBusiness(businessId, {
           mpPreapprovalId: data.id || null,
-          mpPayerEmail: email,
+          mpPayerEmail: payerEmail,
           mpLastCheckoutAt: new Date().toISOString(),
         });
       } catch (err) {
@@ -105,6 +117,7 @@ exports.handler = async (event) => {
       url: initPoint,
       id: data.id,
       status: data.status,
+      testMode: Boolean(data.sandbox_init_point),
     });
   } catch (err) {
     return json(500, { error: err.message || "Error creando suscripción MP" });
