@@ -21,13 +21,14 @@ En el site **ordino-ar** (landing):
 ```
 MP_ACCESS_TOKEN=          # Access Token (test o prod) de la app Ordino
 MP_AMOUNT_ARS=7500        # Precio mensual en ARS
-MP_TEST_PAYER_EMAIL=      # Solo en pruebas: email del comprador de prueba (test_user_…@testuser.com)
+MP_TEST_USER_ID=          # Solo pruebas: User ID numérico del comprador (ej. 3248032089)
+MP_TEST_PAYER_EMAIL=      # Alternativa: test_user_{id}@testuser.com
 MP_MODE=test              # Opcional, fuerza modo prueba
 URL=https://ordino-ar.netlify.app
 FIREBASE_SERVICE_ACCOUNT= # JSON completo del service account (una sola línea)
 ```
 
-**Importante (pruebas):** el `payer_email` de la suscripción tiene que coincidir con la cuenta con la que iniciás sesión en el checkout. Por eso en test usamos `MP_TEST_PAYER_EMAIL` = email del usuario **Comprador** de prueba.
+**Importante (pruebas):** no uses el nombre `TESTUSER…` como email. En la tarjeta del comprador copiá el **User ID** (solo números) → `MP_TEST_USER_ID`. El backend arma `test_user_{id}@testuser.com`.
 
 Webhook Mercado Pago (Tus integraciones → Webhooks):
 

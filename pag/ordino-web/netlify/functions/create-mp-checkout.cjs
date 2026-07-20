@@ -1,7 +1,14 @@
 /**
  * Crea una suscripción Mercado Pago (preapproval pending) y devuelve init_point.
- * Env: MP_ACCESS_TOKEN, MP_AMOUNT_ARS (default 7500), URL
- * Test: MP_TEST_PAYER_EMAIL (email del comprador de prueba), MP_MODE=test (opcional)
+ *
+ * Env:
+ * - MP_ACCESS_TOKEN
+ * - MP_AMOUNT_ARS (default 7500)
+ * - URL
+ * Test:
+ * - MP_TEST_USER_ID  → arma test_user_{id}@testuser.com (recomendado)
+ * - MP_TEST_PAYER_EMAIL → override manual del email
+ * - MP_MODE=test
  */
 function json(statusCode, body) {
   return {
@@ -9,6 +16,33 @@ function json(statusCode, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   };
+}
+
+function resolveTestPayerEmail() {
+  const explicit = String(process.env.MP_TEST_PAYER_EMAIL || "").trim();
+  const userId = String(process.env.MP_TEST_USER_ID || "").trim();
+
+  if (userId && /^\d+$/.test(userId)) {
+    return `test_user_${userId}@testuser.com`;
+  }
+
+  if (!explicit) return "";
+
+  // Normalizar errores comunes al copiar el Usuario TESTUSER…
+  const lower = explicit.toLowerCase();
+  if (lower.endsWith("@testuser.com")) return lower;
+
+  // Si pegaron solo el User ID
+  if (/^\d+$/.test(explicit)) {
+    return `test_user_${explicit}@testuser.com`;
+  }
+
+  // Si pegaron TESTUSER123… sin @
+  if (/^testuser\d+$/i.test(explicit)) {
+    return `${explicit}@testuser.com`.toLowerCase();
+  }
+
+  return explicit;
 }
 
 exports.handler = async (event) => {
@@ -42,26 +76,25 @@ exports.handler = async (event) => {
     return json(400, { error: "businessId y email son requeridos" });
   }
 
-  // En sandbox, payer_email DEBE ser el email del usuario comprador de prueba
-  // (test_user_…@testuser.com). Si mandamos el Gmail de Ordino y pagás con
-  // otra cuenta, MP deja Confirmar deshabilitado / rechaza el pago.
-  const testPayerEmail = String(process.env.MP_TEST_PAYER_EMAIL || "").trim();
+  const isTestToken = String(token).startsWith("TEST-");
   const forceTest =
-    String(token).startsWith("TEST-") ||
+    isTestToken ||
     String(process.env.MP_MODE || "").toLowerCase() === "test" ||
-    Boolean(testPayerEmail);
+    Boolean(process.env.MP_TEST_USER_ID || process.env.MP_TEST_PAYER_EMAIL);
+
+  const testPayerEmail = resolveTestPayerEmail();
   const payerEmail = forceTest && testPayerEmail ? testPayerEmail : String(email);
 
   if (forceTest && !testPayerEmail) {
     return json(500, {
       error:
-        "Modo prueba: agregá en Netlify MP_TEST_PAYER_EMAIL con el email del comprador de prueba (Cuentas de prueba → Comprador).",
+        "Modo prueba: en Netlify poné MP_TEST_USER_ID = User ID numérico del comprador de prueba (ej. 3248032089). Eso arma test_user_{id}@testuser.com.",
     });
   }
 
   try {
     const body = {
-      reason: "Ordino — plan mensual",
+      reason: "Ordino plan mensual",
       external_reference: String(businessId),
       payer_email: payerEmail,
       back_url: `${siteUrl}/dashboard?checkout=success`,
@@ -74,12 +107,18 @@ exports.handler = async (event) => {
       },
     };
 
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    };
+    // Requerido por MP en varias APIs de sandbox con token TEST-
+    if (isTestToken || forceTest) {
+      headers["X-Scope"] = "stage";
+    }
+
     const res = await fetch("https://api.mercadopago.com/preapproval", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify(body),
     });
 
@@ -95,16 +134,21 @@ exports.handler = async (event) => {
         data?.message ||
         data?.error ||
         `Mercado Pago error ${res.status}`;
+
+      let hint = "";
+      if (String(msg).toLowerCase().includes("payer") && String(msg).toLowerCase().includes("collector")) {
+        hint =
+          " Usá MP_TEST_USER_ID = User ID del comprador (número de la tarjeta de prueba), no el nombre TESTUSER….";
+      }
+
       return json(502, {
-        error: msg,
+        error: msg + hint,
         mpStatus: res.status,
         details: data,
         payerEmailUsed: payerEmail,
       });
     }
 
-    // Si existe sandbox_init_point, usarlo (credenciales de prueba).
-    // En producción suele venir solo init_point.
     const initPoint = data.sandbox_init_point || data.init_point;
     if (!initPoint) {
       return json(502, { error: "Mercado Pago no devolvió init_point", details: data });
@@ -127,7 +171,8 @@ exports.handler = async (event) => {
       url: initPoint,
       id: data.id,
       status: data.status,
-      testMode: Boolean(data.sandbox_init_point),
+      testMode: Boolean(data.sandbox_init_point) || isTestToken,
+      payerEmailUsed: payerEmail,
     });
   } catch (err) {
     return json(500, { error: err.message || "Error creando suscripción MP" });
