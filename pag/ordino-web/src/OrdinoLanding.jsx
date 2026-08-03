@@ -231,12 +231,6 @@ export default function OrdinoLanding() {
                   Ordino existe para que el mismo control que vi funcionar en lugares grandes,{" "}
                   <span className="text-signal">sea accesible para cualquier negocio.</span>
                 </p>
-                <a
-                  href="mailto:ordino.ar@gmail.com?subject=STOCK"
-                  className="mt-8 inline-flex rounded-2xl border border-signal/40 bg-signal/10 px-5 py-3 text-sm font-medium text-zinc-100 transition hover:border-signal hover:bg-signal/15"
-                >
-                  Escribinos STOCK y arrancá gratis con una plantilla simple.
-                </a>
               </div>
             </div>
           </div>
