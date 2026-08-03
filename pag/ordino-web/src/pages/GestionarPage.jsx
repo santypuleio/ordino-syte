@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ecommerceUrlFor, getSubscriptionState, stockUrlFor, updateBusinessColors } from "../lib/tenants";
+import { submitToolProposal } from "../lib/feedback";
 
 function parseHex(hex) {
   const h = String(hex || "").replace("#", "").trim();
@@ -53,6 +54,12 @@ export default function GestionarPage() {
   const [saveErr, setSaveErr] = useState("");
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [pinHint, setPinHint] = useState("");
+  const [proposeOpen, setProposeOpen] = useState(false);
+  const [proposeText, setProposeText] = useState("");
+  const [proposeKind, setProposeKind] = useState("herramienta");
+  const [proposeBusy, setProposeBusy] = useState(false);
+  const [proposeMsg, setProposeMsg] = useState("");
+  const [proposeErr, setProposeErr] = useState("");
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -107,6 +114,32 @@ export default function GestionarPage() {
   const shopLink = slug ? ecommerceUrlFor(slug) : "#";
   const { brand, accent, primaryDark } = live;
   const businessId = profile?.businessId || business?.id || slug;
+
+  async function sendProposal(e) {
+    e?.preventDefault?.();
+    setProposeMsg("");
+    setProposeErr("");
+    setProposeBusy(true);
+    try {
+      const result = await submitToolProposal({
+        uid: user.uid,
+        email: user.email || "",
+        businessId,
+        kind: proposeKind,
+        message: proposeText,
+      });
+      setProposeMsg(
+        result?.via === "mailto"
+          ? "Abrimos tu mail para enviar la propuesta. ¡Gracias!"
+          : "¡Gracias! Lo leemos y lo tenemos en cuenta."
+      );
+      setProposeText("");
+    } catch (err) {
+      setProposeErr(err?.message || "No se pudo enviar. Probá de nuevo.");
+    } finally {
+      setProposeBusy(false);
+    }
+  }
 
   async function saveColors() {
     setSaveMsg("");
@@ -427,6 +460,83 @@ export default function GestionarPage() {
                 Catálogo público con tu marca
               </div>
             </a>
+
+            <button
+              type="button"
+              onClick={() => {
+                setProposeOpen((v) => !v);
+                setProposeMsg("");
+                setProposeErr("");
+              }}
+              className="group relative w-full overflow-hidden rounded-2xl border border-dashed border-white/20 bg-black/25 px-6 py-6 text-left backdrop-blur-sm transition hover:border-white/35 hover:bg-black/40"
+            >
+              <div className="absolute inset-y-0 left-0 w-1.5 bg-white/25" />
+              <div className="pl-3">
+                <div className="font-display text-xl font-bold text-white">
+                  Proponer una herramienta
+                </div>
+                <div className="mt-1 text-sm text-zinc-400">
+                  Ideas, mejoras o algo que te faltaría en Ordino
+                </div>
+              </div>
+            </button>
+
+            {proposeOpen ? (
+              <form
+                onSubmit={sendProposal}
+                className="rounded-2xl border border-white/10 bg-black/40 px-5 py-5 text-left backdrop-blur-sm"
+              >
+                <p className="text-sm text-zinc-400">
+                  Contanos qué necesitarías. Cuanto más concreto, mejor.
+                </p>
+                <label className="mt-4 block text-xs uppercase tracking-wide text-zinc-500">
+                  Tipo
+                  <select
+                    value={proposeKind}
+                    onChange={(e) => setProposeKind(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/30"
+                  >
+                    <option value="herramienta">Nueva herramienta</option>
+                    <option value="mejora">Mejora a algo existente</option>
+                    <option value="otro">Otro feedback</option>
+                  </select>
+                </label>
+                <label className="mt-3 block text-xs uppercase tracking-wide text-zinc-500">
+                  Tu idea
+                  <textarea
+                    value={proposeText}
+                    onChange={(e) => setProposeText(e.target.value)}
+                    rows={4}
+                    required
+                    placeholder="Ej: un módulo de turnos, reportes de ventas por WhatsApp…"
+                    className="mt-1.5 w-full resize-y rounded-xl border border-white/10 bg-ink-950 px-3 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-white/30"
+                  />
+                </label>
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <button
+                    type="submit"
+                    disabled={proposeBusy}
+                    className="rounded-xl px-4 py-2.5 text-sm font-semibold text-ink-950 disabled:opacity-60"
+                    style={{ background: brand }}
+                  >
+                    {proposeBusy ? "Enviando…" : "Enviar propuesta"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProposeOpen(false)}
+                    className="text-sm text-zinc-500 hover:text-zinc-300"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+                {proposeMsg ? (
+                  <p className="mt-3 text-sm text-signal">{proposeMsg}</p>
+                ) : null}
+                {proposeErr ? (
+                  <p className="mt-3 text-sm text-amber-200">{proposeErr}</p>
+                ) : null}
+              </form>
+            ) : null}
           </div>
         </div>
       </div>

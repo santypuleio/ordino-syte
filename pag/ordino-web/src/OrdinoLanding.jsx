@@ -37,6 +37,9 @@ export default function OrdinoLanding() {
             <a href="#incluye" className="hover:text-white">
               Qué incluye
             </a>
+            <a href="#nosotros" className="hover:text-white">
+              Quiénes somos
+            </a>
             <a href="#precio" className="hover:text-white">
               Precio
             </a>
@@ -176,6 +179,69 @@ export default function OrdinoLanding() {
           </div>
         </section>
 
+        <section id="nosotros" className="scroll-mt-24 border-t border-white/5 py-24">
+          <div className="mx-auto max-w-3xl px-4">
+            <p className="font-display text-sm font-semibold uppercase tracking-[0.2em] text-signal">
+              Quiénes somos
+            </p>
+
+            <div className="mt-10 space-y-16">
+              <blockquote>
+                <p className="font-display text-3xl font-extrabold leading-[1.15] tracking-tight text-white sm:text-4xl">
+                  No aprendí esto en un curso. Lo aprendí{" "}
+                  <span className="text-signal">en el economato de un hospital.</span>
+                </p>
+                <footer className="mt-5 text-sm text-zinc-500">
+                  — Santiago, fundador de Ordino
+                </footer>
+              </blockquote>
+
+              <p className="font-display text-2xl font-bold leading-snug tracking-tight text-white sm:text-3xl">
+                Todos los días pasaba lo mismo: pedíamos de más lo que ya sobraba, y faltaba{" "}
+                <span className="text-signal">lo esencial</span> justo cuando más se necesitaba.
+              </p>
+
+              <div>
+                <p className="font-display text-2xl font-bold leading-snug tracking-tight text-white sm:text-3xl">
+                  Ahí empecé a armar mis propios sistemas para ordenar eso.
+                </p>
+                <p className="mt-4 max-w-xl text-base leading-relaxed text-zinc-400">
+                  Resulta que además de vivir el problema, tenía las herramientas: soy técnico en
+                  desarrollo de software, terminando la Licenciatura en Gestión de TI.
+                </p>
+              </div>
+
+              <p className="font-display text-2xl font-bold leading-snug tracking-tight text-white sm:text-3xl">
+                Después lo volví a ver en un lugar muy distinto: una multinacional donde trabajo
+                hoy. Con todos los recursos del mundo… y{" "}
+                <span className="text-signal">el mismo caos.</span>
+              </p>
+
+              <div>
+                <p className="font-display text-2xl font-bold leading-snug tracking-tight text-white sm:text-3xl">
+                  Si esto le pasa a una empresa gigante…
+                </p>
+                <p className="mt-4 font-display text-2xl font-bold leading-snug tracking-tight text-signal sm:text-3xl">
+                  ¿Qué le pasa a un comercio que no tiene tiempo, ni equipo, ni sistema?
+                </p>
+              </div>
+
+              <div className="border-t border-white/10 pt-12">
+                <p className="font-display text-2xl font-bold leading-snug tracking-tight text-white sm:text-3xl">
+                  Ordino existe para que el mismo control que vi funcionar en lugares grandes,{" "}
+                  <span className="text-signal">sea accesible para cualquier negocio.</span>
+                </p>
+                <a
+                  href="mailto:ordino.ar@gmail.com?subject=STOCK"
+                  className="mt-8 inline-flex rounded-2xl border border-signal/40 bg-signal/10 px-5 py-3 text-sm font-medium text-zinc-100 transition hover:border-signal hover:bg-signal/15"
+                >
+                  Escribinos STOCK y arrancá gratis con una plantilla simple.
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section id="precio" className="scroll-mt-24 border-t border-white/5 bg-ink-900/40 py-20">
           <div className="mx-auto max-w-5xl px-4 text-center">
             <h2 className="font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">
@@ -211,6 +277,9 @@ export default function OrdinoLanding() {
         <div className="mx-auto flex max-w-5xl flex-col items-start justify-between gap-4 px-4 sm:flex-row sm:items-center">
           <div className="font-display text-lg font-bold text-white">Ordino</div>
           <div className="flex flex-wrap gap-4 text-sm text-zinc-500">
+            <a href="#nosotros" className="hover:text-zinc-300">
+              Quiénes somos
+            </a>
             <a href="mailto:ordino.ar@gmail.com" className="hover:text-zinc-300">
               ordino.ar@gmail.com
             </a>

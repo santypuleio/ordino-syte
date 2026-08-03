@@ -66,5 +66,16 @@ service cloud.firestore {
         allow update, delete: if false;
       }
     }
+
+    // Ideas / feedback de usuarios (solo crear; lectura vía consola admin)
+    match /feedback/{feedbackId} {
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 2
+        && request.resource.data.message.size() < 4000
+        && request.resource.data.keys().hasAll(['uid', 'message', 'createdAt']);
+      allow read, update, delete: if false;
+    }
   }
 }
