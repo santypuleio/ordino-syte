@@ -3,13 +3,21 @@ import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { auth, firebaseConfigError } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
-import { acceptTeamInvite, getInviteByToken, isInviteValid } from "../lib/team";
+import { getBusiness } from "../lib/tenants";
+import {
+  acceptTeamInvite,
+  clearInviteToken,
+  getInviteByToken,
+  isInviteValid,
+  peekInviteToken,
+  rememberInviteToken,
+} from "../lib/team";
 
 export default function RegisterPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const inviteToken = searchParams.get("invite") || "";
-  const { user, profile, loading, refreshProfile } = useAuth();
+  const inviteToken = searchParams.get("invite") || peekInviteToken() || "";
+  const { user, profile, loading, refreshProfile, setProfile, setBusiness } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -17,6 +25,10 @@ export default function RegisterPage() {
   const [busy, setBusy] = useState(false);
   const [invitePreview, setInvitePreview] = useState(null);
   const [inviteErr, setInviteErr] = useState("");
+
+  useEffect(() => {
+    if (inviteToken) rememberInviteToken(inviteToken);
+  }, [inviteToken]);
 
   useEffect(() => {
     if (!inviteToken) return;
@@ -44,8 +56,42 @@ export default function RegisterPage() {
   if (!loading && user && profile?.onboardingCompleted === true) {
     return <Navigate to="/gestionar" replace />;
   }
+  // Invitados NUNCA van a configurar marca
   if (!loading && user && profile && profile.onboardingCompleted !== true && !inviteToken) {
     return <Navigate to="/onboarding" replace />;
+  }
+
+  async function finishAsStaff(cred) {
+    const result = await acceptTeamInvite(inviteToken, {
+      uid: cred.user.uid,
+      email: cred.user.email,
+      displayName: name.trim() || cred.user.displayName,
+    });
+    const refreshed = await refreshProfile?.();
+    const businessId = result?.businessId || refreshed?.profile?.businessId;
+    if (refreshed?.profile) {
+      setProfile(refreshed.profile);
+    } else {
+      setProfile({
+        email: cred.user.email,
+        displayName: name.trim() || cred.user.displayName || "",
+        businessId,
+        role: "staff",
+        onboardingCompleted: true,
+      });
+    }
+    if (refreshed?.business) {
+      setBusiness(refreshed.business);
+    } else if (businessId) {
+      try {
+        const b = await getBusiness(businessId);
+        setBusiness(b);
+      } catch {
+        /* ignore */
+      }
+    }
+    clearInviteToken();
+    navigate("/gestionar", { replace: true });
   }
 
   async function onSubmit(e) {
@@ -72,13 +118,7 @@ export default function RegisterPage() {
       }
 
       if (inviteToken) {
-        await acceptTeamInvite(inviteToken, {
-          uid: cred.user.uid,
-          email: cred.user.email,
-          displayName: name.trim() || cred.user.displayName,
-        });
-        await refreshProfile?.();
-        navigate("/gestionar", { replace: true });
+        await finishAsStaff(cred);
       } else {
         navigate("/onboarding", { replace: true });
       }
@@ -103,11 +143,11 @@ export default function RegisterPage() {
           Ordino
         </Link>
         <h1 className="mt-8 font-display text-3xl font-extrabold tracking-tight">
-          {invitePreview ? "Crear cuenta y unirte" : "Crear cuenta"}
+          {invitePreview || inviteToken ? "Crear cuenta y unirte" : "Crear cuenta"}
         </h1>
         <p className="mt-2 text-sm text-zinc-400">
-          {invitePreview
-            ? `Te unís a ${invitePreview.businessName} como empleado.`
+          {invitePreview || inviteToken
+            ? `Te unís${invitePreview?.businessName ? ` a ${invitePreview.businessName}` : ""} como empleado. No tenés que configurar una marca.`
             : "En el siguiente paso configurás tu marca y se generan stock + tienda."}
         </p>
 
@@ -164,7 +204,7 @@ export default function RegisterPage() {
             disabled={busy || Boolean(inviteErr)}
             className="w-full rounded-xl bg-signal px-4 py-3 font-semibold text-ink-950 hover:bg-signal-soft disabled:opacity-60 transition"
           >
-            {busy ? "Creando…" : invitePreview ? "Crear cuenta y unirme" : "Continuar"}
+            {busy ? "Creando…" : inviteToken ? "Crear cuenta y unirme" : "Continuar"}
           </button>
         </form>
 

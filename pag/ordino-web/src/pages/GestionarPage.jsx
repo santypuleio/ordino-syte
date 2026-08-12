@@ -12,6 +12,7 @@ import {
   revokeTeamInvite,
   sendTeamInviteEmail,
   ensureOwnerMember,
+  peekInviteToken,
 } from "../lib/team";
 
 function parseHex(hex) {
@@ -154,7 +155,11 @@ export default function GestionarPage() {
   }
 
   if (!user) return <Navigate to="/login" replace />;
-  if (!profile?.onboardingCompleted) return <Navigate to="/onboarding" replace />;
+  if (!profile?.onboardingCompleted) {
+    const pending = peekInviteToken();
+    if (pending) return <Navigate to={`/join/${encodeURIComponent(pending)}`} replace />;
+    return <Navigate to="/onboarding" replace />;
+  }
 
   const name = business?.name || profile?.displayName || "tu negocio";
   const slug = business?.slug || profile?.businessId || "";

@@ -4,18 +4,22 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth, firebaseConfigError } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import { getUserProfile } from "../lib/tenants";
-import { acceptTeamInvite, getInviteByToken, isInviteValid } from "../lib/team";
+import { acceptTeamInvite, getInviteByToken, isInviteValid, rememberInviteToken, clearInviteToken, peekInviteToken } from "../lib/team";
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const inviteToken = searchParams.get("invite") || "";
+  const inviteToken = searchParams.get("invite") || peekInviteToken() || "";
   const { user, profile, loading, logout, setProfile, setBusiness, refreshProfile } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [invitePreview, setInvitePreview] = useState(null);
+
+  useEffect(() => {
+    if (inviteToken) rememberInviteToken(inviteToken);
+  }, [inviteToken]);
 
   useEffect(() => {
     if (!inviteToken) return;
@@ -59,9 +63,9 @@ export default function LoginPage() {
           email: cred.user.email,
           displayName: cred.user.displayName,
         });
-        const refreshed = await refreshProfile?.();
+        await refreshProfile?.();
+        clearInviteToken();
         navigate("/gestionar", { replace: true });
-        void refreshed;
         return;
       }
 

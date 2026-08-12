@@ -5,6 +5,8 @@ import {
   acceptTeamInvite,
   getInviteByToken,
   isInviteValid,
+  rememberInviteToken,
+  clearInviteToken,
 } from "../lib/team";
 
 export default function JoinPage() {
@@ -16,6 +18,10 @@ export default function JoinPage() {
   const [busy, setBusy] = useState(false);
   const [acceptError, setAcceptError] = useState("");
   const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    if (token) rememberInviteToken(token);
+  }, [token]);
 
   useEffect(() => {
     let alive = true;
@@ -65,6 +71,7 @@ export default function JoinPage() {
         displayName: user.displayName,
       });
       await refreshProfile?.();
+      clearInviteToken();
       navigate("/gestionar", { replace: true });
     } catch (e) {
       setAcceptError(e?.message || "No se pudo unir al equipo.");

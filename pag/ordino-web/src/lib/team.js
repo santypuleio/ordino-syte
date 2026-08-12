@@ -15,6 +15,35 @@ import { db } from "./firebase";
 import { auth } from "./firebase";
 
 export const INVITE_EXPIRY_DAYS = 7;
+const INVITE_STORAGE_KEY = "ordino_pending_invite";
+
+/** Persiste el token para que sobreviva el race post-registro → onboarding. */
+export function rememberInviteToken(token) {
+  if (!token || typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(INVITE_STORAGE_KEY, token);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function peekInviteToken() {
+  if (typeof sessionStorage === "undefined") return "";
+  try {
+    return sessionStorage.getItem(INVITE_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function clearInviteToken() {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.removeItem(INVITE_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 function landingBaseUrl() {
   if (typeof window !== "undefined" && window.location?.origin) {

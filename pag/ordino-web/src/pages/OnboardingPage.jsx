@@ -9,10 +9,15 @@ import {
   slugify,
   stockUrlFor,
 } from "../lib/tenants";
+import {
+  acceptTeamInvite,
+  clearInviteToken,
+  peekInviteToken,
+} from "../lib/team";
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
-  const { user, profile, loading, setProfile, setBusiness } = useAuth();
+  const { user, profile, loading, setProfile, setBusiness, refreshProfile } = useAuth();
 
   const [brandName, setBrandName] = useState("");
   const [slug, setSlug] = useState("");
@@ -24,6 +29,52 @@ export default function OnboardingPage() {
   const [logoUrl, setLogoUrl] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const pendingInvite = peekInviteToken();
+
+  // Si llegó acá por race tras registro con invite → aceptar y salir
+  useEffect(() => {
+    if (loading || !user || !pendingInvite) return undefined;
+    if (profile?.onboardingCompleted && profile?.role === "staff") {
+      clearInviteToken();
+      navigate("/gestionar", { replace: true });
+      return undefined;
+    }
+
+    let alive = true;
+    (async () => {
+      setInviteBusy(true);
+      try {
+        await acceptTeamInvite(pendingInvite, {
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+        });
+        if (!alive) return;
+        await refreshProfile?.();
+        clearInviteToken();
+        navigate("/gestionar", { replace: true });
+      } catch (e) {
+        if (!alive) return;
+        // Si ya es staff ok; si no, mostrar error y no dejar crear marca
+        if (profile?.role === "staff" && profile?.onboardingCompleted) {
+          clearInviteToken();
+          navigate("/gestionar", { replace: true });
+          return;
+        }
+        setError(
+          e?.message ||
+            "No se pudo unir al equipo. Volvé al link de invitación o pedí una nueva."
+        );
+      } finally {
+        if (alive) setInviteBusy(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [loading, user, pendingInvite, profile?.onboardingCompleted, profile?.role, navigate, refreshProfile]);
 
   useEffect(() => {
     if (!slugTouched && brandName) {
@@ -34,16 +85,38 @@ export default function OnboardingPage() {
   const previewStock = useMemo(() => (isValidSlug(slug) ? stockUrlFor(slug) : ""), [slug]);
   const previewShop = useMemo(() => (isValidSlug(slug) ? ecommerceUrlFor(slug) : ""), [slug]);
 
-  if (loading) {
+  if (loading || inviteBusy) {
     return (
       <div className="min-h-screen grid place-items-center bg-zinc-950 text-zinc-300">
-        Cargando…
+        {inviteBusy ? "Uniéndote al equipo…" : "Cargando…"}
       </div>
     );
   }
 
   if (!user) return <Navigate to="/login" replace />;
   if (profile?.onboardingCompleted) return <Navigate to="/gestionar" replace />;
+
+  // Invitado sin perfil completo todavía: no mostrar form de marca
+  if (pendingInvite) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-zinc-950 px-4 text-center text-zinc-300">
+        <div className="max-w-md">
+          <p className="font-display text-xl font-bold text-white">Invitación pendiente</p>
+          <p className="mt-2 text-sm text-zinc-400">
+            {error || "Estamos uniéndote al equipo. Si esto no avanza, volvé a abrir el link de invitación."}
+          </p>
+          {error ? (
+            <Link
+              to={`/join/${encodeURIComponent(pendingInvite)}`}
+              className="mt-4 inline-block text-sm font-semibold text-signal"
+            >
+              Volver a la invitación
+            </Link>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
 
   async function onSubmit(e) {
     e.preventDefault();
