@@ -1,23 +1,50 @@
-import { useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { auth, firebaseConfigError } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
+import { acceptTeamInvite, getInviteByToken, isInviteValid } from "../lib/team";
 
 export default function RegisterPage() {
   const navigate = useNavigate();
-  const { user, profile, loading } = useAuth();
+  const [searchParams] = useSearchParams();
+  const inviteToken = searchParams.get("invite") || "";
+  const { user, profile, loading, refreshProfile } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [invitePreview, setInvitePreview] = useState(null);
+  const [inviteErr, setInviteErr] = useState("");
+
+  useEffect(() => {
+    if (!inviteToken) return;
+    let alive = true;
+    (async () => {
+      try {
+        const inv = await getInviteByToken(inviteToken);
+        if (!alive) return;
+        const check = isInviteValid(inv);
+        if (!check.ok) {
+          setInviteErr(check.reason);
+        } else {
+          setInvitePreview(inv);
+          setEmail(inv.email || "");
+        }
+      } catch (e) {
+        if (alive) setInviteErr(e?.message || "Invitación inválida.");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [inviteToken]);
 
   if (!loading && user && profile?.onboardingCompleted === true) {
     return <Navigate to="/gestionar" replace />;
   }
-  // Si ya hay sesión sin onboarding, el alta de marca es el siguiente paso
-  if (!loading && user && profile && profile.onboardingCompleted !== true) {
+  if (!loading && user && profile && profile.onboardingCompleted !== true && !inviteToken) {
     return <Navigate to="/onboarding" replace />;
   }
 
@@ -32,6 +59,10 @@ export default function RegisterPage() {
       setError("La contraseña debe tener al menos 6 caracteres.");
       return;
     }
+    if (inviteToken && invitePreview && email.trim().toLowerCase() !== invitePreview.email) {
+      setError(`Esta invitación es para ${invitePreview.email}.`);
+      return;
+    }
 
     setBusy(true);
     try {
@@ -39,7 +70,18 @@ export default function RegisterPage() {
       if (name.trim()) {
         await updateProfile(cred.user, { displayName: name.trim() });
       }
-      navigate("/onboarding", { replace: true });
+
+      if (inviteToken) {
+        await acceptTeamInvite(inviteToken, {
+          uid: cred.user.uid,
+          email: cred.user.email,
+          displayName: name.trim() || cred.user.displayName,
+        });
+        await refreshProfile?.();
+        navigate("/gestionar", { replace: true });
+      } else {
+        navigate("/onboarding", { replace: true });
+      }
     } catch (err) {
       setError(err?.message || "No se pudo crear la cuenta");
     } finally {
@@ -61,11 +103,19 @@ export default function RegisterPage() {
           Ordino
         </Link>
         <h1 className="mt-8 font-display text-3xl font-extrabold tracking-tight">
-          Crear cuenta
+          {invitePreview ? "Crear cuenta y unirte" : "Crear cuenta"}
         </h1>
         <p className="mt-2 text-sm text-zinc-400">
-          En el siguiente paso configurás tu marca y se generan stock + tienda.
+          {invitePreview
+            ? `Te unís a ${invitePreview.businessName} como empleado.`
+            : "En el siguiente paso configurás tu marca y se generan stock + tienda."}
         </p>
+
+        {inviteErr ? (
+          <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+            {inviteErr}
+          </div>
+        ) : null}
 
         <form
           onSubmit={onSubmit}
@@ -86,7 +136,8 @@ export default function RegisterPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2.5 outline-none focus:border-signal"
+              readOnly={Boolean(invitePreview?.email)}
+              className="mt-1 w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2.5 outline-none focus:border-signal disabled:opacity-70"
               required
             />
           </label>
@@ -110,16 +161,19 @@ export default function RegisterPage() {
 
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy || Boolean(inviteErr)}
             className="w-full rounded-xl bg-signal px-4 py-3 font-semibold text-ink-950 hover:bg-signal-soft disabled:opacity-60 transition"
           >
-            {busy ? "Creando…" : "Continuar"}
+            {busy ? "Creando…" : invitePreview ? "Crear cuenta y unirme" : "Continuar"}
           </button>
         </form>
 
         <p className="mt-6 text-sm text-zinc-500">
           ¿Ya tenés cuenta?{" "}
-          <Link to="/login" className="font-medium text-signal hover:text-signal-soft">
+          <Link
+            to={inviteToken ? `/login?invite=${encodeURIComponent(inviteToken)}` : "/login"}
+            className="font-medium text-signal hover:text-signal-soft"
+          >
             Ingresar
           </Link>
         </p>

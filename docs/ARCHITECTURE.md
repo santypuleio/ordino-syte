@@ -22,10 +22,13 @@ Compat: ecommerce sin slug sigue usando `VITE_FIREBASE_BUSINESS_ID` (ej. `demo-b
 
 | Rol | Quién | Acceso |
 |-----|-------|--------|
-| `owner` | Usuario Auth dueño del tenant | CRUD stock/ventas/compras; dashboard; billing |
+| `owner` | Usuario Auth dueño del tenant | CRUD stock/ventas/compras; dashboard; billing; invitar staff |
+| `staff` | Empleado invitado por email | CRUD stock/ventas/compras; sin billing ni invitar |
 | Público | Sin Auth | Solo lectura del catálogo ecommerce de un `slug` |
 
-No hay rol “comprador autenticado” por ahora (compra = WhatsApp).
+Invitaciones: colección `invites/{token}` + miembros en `businesses/{id}/members/{uid}`.
+
+Ver `docs/FIRESTORE_RULES_TEAM.md` para publicar reglas.
 
 ## Firestore
 

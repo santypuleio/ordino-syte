@@ -3,6 +3,16 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ecommerceUrlFor, getSubscriptionState, stockUrlFor, updateBusinessColors, updateBusinessWhatsapp } from "../lib/tenants";
 import { submitToolProposal } from "../lib/feedback";
+import {
+  createTeamInvite,
+  isOwnerRole,
+  listPendingInvites,
+  listTeamMembers,
+  removeTeamMember,
+  revokeTeamInvite,
+  sendTeamInviteEmail,
+  ensureOwnerMember,
+} from "../lib/team";
 
 function parseHex(hex) {
   const h = String(hex || "").replace("#", "").trim();
@@ -44,6 +54,8 @@ function isStandalone() {
 export default function GestionarPage() {
   const navigate = useNavigate();
   const { user, profile, business, loading, logout, setBusiness } = useAuth();
+  const businessId = profile?.businessId || business?.id || "";
+  const isOwner = isOwnerRole(profile);
 
   const [configOpen, setConfigOpen] = useState(false);
   const [colorsOpen, setColorsOpen] = useState(false);
@@ -65,6 +77,14 @@ export default function GestionarPage() {
   const [proposeBusy, setProposeBusy] = useState(false);
   const [proposeMsg, setProposeMsg] = useState("");
   const [proposeErr, setProposeErr] = useState("");
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [members, setMembers] = useState([]);
+  const [pendingInvites, setPendingInvites] = useState([]);
+  const [teamBusy, setTeamBusy] = useState(false);
+  const [teamMsg, setTeamMsg] = useState("");
+  const [teamErr, setTeamErr] = useState("");
+  const [lastInviteLink, setLastInviteLink] = useState("");
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -97,6 +117,27 @@ export default function GestionarPage() {
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [configOpen]);
 
+  useEffect(() => {
+    if (!teamOpen || !isOwner || !businessId) return undefined;
+    let alive = true;
+    (async () => {
+      try {
+        const [m, inv] = await Promise.all([
+          listTeamMembers(businessId),
+          listPendingInvites(businessId),
+        ]);
+        if (!alive) return;
+        setMembers(m);
+        setPendingInvites(inv);
+      } catch {
+        /* rules may block until published */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [teamOpen, isOwner, businessId]);
+
   const live = useMemo(
     () => resolveBrandColors(business, { primaryColor, accentColor }),
     [business, primaryColor, accentColor]
@@ -120,7 +161,88 @@ export default function GestionarPage() {
   const stockLink = slug ? stockUrlFor(slug) : "#";
   const shopLink = slug ? ecommerceUrlFor(slug) : "#";
   const { brand, accent, primaryDark } = live;
-  const businessId = profile?.businessId || business?.id || slug;
+
+  async function refreshTeam() {
+    if (!businessId) return;
+    if (isOwner && user) {
+      await ensureOwnerMember(businessId, {
+        uid: user.uid,
+        email: user.email || "",
+        displayName: user.displayName || profile?.displayName || "",
+      }).catch(() => {});
+    }
+    const [m, inv] = await Promise.all([
+      listTeamMembers(businessId),
+      listPendingInvites(businessId),
+    ]);
+    setMembers(m);
+    setPendingInvites(inv);
+  }
+
+  async function handleInvite(e) {
+    e?.preventDefault?.();
+    setTeamMsg("");
+    setTeamErr("");
+    setLastInviteLink("");
+    if (!businessId) {
+      setTeamErr("No se encontró el negocio.");
+      return;
+    }
+    setTeamBusy(true);
+    try {
+      const { token, joinUrl } = await createTeamInvite({
+        businessId,
+        businessName: name,
+        email: inviteEmail,
+        invitedByUid: user.uid,
+        invitedByEmail: user.email || "",
+      });
+      const sent = await sendTeamInviteEmail({
+        token,
+        email: inviteEmail.trim().toLowerCase(),
+        businessName: name,
+        businessId,
+      });
+      setLastInviteLink(sent.joinUrl || joinUrl);
+      setTeamMsg(
+        sent.via === "email"
+          ? `Invitación enviada a ${inviteEmail.trim()}.`
+          : `Invitación creada. Copiá el link y compartilo con ${inviteEmail.trim()}.`
+      );
+      setInviteEmail("");
+      await refreshTeam();
+    } catch (err) {
+      setTeamErr(err?.message || "No se pudo invitar.");
+    } finally {
+      setTeamBusy(false);
+    }
+  }
+
+  async function handleRevokeInvite(token) {
+    setTeamBusy(true);
+    try {
+      await revokeTeamInvite(token);
+      await refreshTeam();
+    } catch (err) {
+      setTeamErr(err?.message || "No se pudo cancelar.");
+    } finally {
+      setTeamBusy(false);
+    }
+  }
+
+  async function handleRemoveMember(memberUid) {
+    if (!window.confirm("¿Quitar acceso a este empleado?")) return;
+    setTeamBusy(true);
+    try {
+      await removeTeamMember(businessId, memberUid);
+      await refreshTeam();
+      setTeamMsg("Empleado removido.");
+    } catch (err) {
+      setTeamErr(err?.message || "No se pudo remover.");
+    } finally {
+      setTeamBusy(false);
+    }
+  }
 
   async function sendProposal(e) {
     e?.preventDefault?.();
@@ -259,10 +381,13 @@ export default function GestionarPage() {
             Ordino
           </Link>
           <nav className="flex items-center gap-4 text-sm">
-            <Link to="/dashboard" className="text-zinc-500 hover:text-zinc-300">
-              Suscripción
-            </Link>
+            {isOwner ? (
+              <Link to="/dashboard" className="text-zinc-500 hover:text-zinc-300">
+                Suscripción
+              </Link>
+            ) : null}
 
+            {isOwner ? (
             <div className="relative" ref={menuRef}>
               <button
                 type="button"
@@ -463,6 +588,15 @@ export default function GestionarPage() {
                 </div>
               ) : null}
             </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="text-zinc-500 hover:text-zinc-300"
+              >
+                Cerrar sesión
+              </button>
+            )}
           </nav>
         </div>
 
@@ -488,14 +622,26 @@ export default function GestionarPage() {
             )}
 
             <p className="text-xs font-medium uppercase tracking-[0.22em] text-zinc-500">
-              Panel de tu marca
+              {isOwner ? "Panel de tu marca" : "Acceso empleado"}
             </p>
             <h1 className="mt-3 font-display text-4xl font-extrabold tracking-tight sm:text-5xl">
-              Gestioná <span style={{ color: brand }}>{name}</span>
+              {isOwner ? (
+                <>
+                  Gestioná <span style={{ color: brand }}>{name}</span>
+                </>
+              ) : (
+                <>
+                  Trabajás en <span style={{ color: brand }}>{name}</span>
+                </>
+              )}
             </h1>
-            <p className="mt-3 text-zinc-400">Elegí dónde entrar. Todo está listo.</p>
+            <p className="mt-3 text-zinc-400">
+              {isOwner
+                ? "Elegí dónde entrar. Todo está listo."
+                : "Entrá al gestor de stock de la marca."}
+            </p>
 
-            {sub.active && sub.status === "trial" && sub.daysLeft != null ? (
+            {isOwner && sub.active && sub.status === "trial" && sub.daysLeft != null ? (
               <div className="mt-5 inline-flex flex-col items-center gap-1">
                 <span
                   className="rounded-full px-3 py-1 text-xs font-bold tracking-wide text-ink-950"
@@ -516,7 +662,7 @@ export default function GestionarPage() {
               </div>
             ) : null}
 
-            {!sub.active ? (
+            {isOwner && !sub.active ? (
               <div className="mt-5 inline-flex flex-col items-center gap-2">
                 <span className="rounded-full border border-amber-400/40 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-100">
                   Prueba finalizada
@@ -562,27 +708,155 @@ export default function GestionarPage() {
               </div>
             </a>
 
-            <button
-              type="button"
-              onClick={() => {
-                setProposeOpen((v) => !v);
-                setProposeMsg("");
-                setProposeErr("");
-              }}
-              className="group relative w-full overflow-hidden rounded-2xl border border-dashed border-white/20 bg-black/25 px-6 py-6 text-left backdrop-blur-sm transition hover:border-white/35 hover:bg-black/40"
-            >
-              <div className="absolute inset-y-0 left-0 w-1.5 bg-white/25" />
-              <div className="pl-3">
-                <div className="font-display text-xl font-bold text-white">
-                  Proponer una herramienta
-                </div>
-                <div className="mt-1 text-sm text-zinc-400">
-                  Ideas, mejoras o algo que te faltaría en Ordino
-                </div>
-              </div>
-            </button>
+            {isOwner ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTeamOpen((v) => !v);
+                    setTeamMsg("");
+                    setTeamErr("");
+                    setLastInviteLink("");
+                  }}
+                  className="group relative w-full overflow-hidden rounded-2xl border border-white/10 bg-black/35 px-6 py-6 text-left backdrop-blur-sm transition hover:border-white/25"
+                >
+                  <div className="absolute inset-y-0 left-0 w-1.5" style={{ background: accent }} />
+                  <div className="pl-3">
+                    <div className="font-display text-xl font-bold text-white">
+                      Equipo
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-400">
+                      Invitá empleados al gestor de stock
+                    </div>
+                  </div>
+                </button>
 
-            {proposeOpen ? (
+                {teamOpen ? (
+                  <div className="rounded-2xl border border-white/10 bg-black/40 px-5 py-5 text-left backdrop-blur-sm">
+                    <p className="text-sm text-zinc-400">
+                      Enviá una invitación por email. La persona crea cuenta y entra como empleado.
+                    </p>
+                    <form onSubmit={handleInvite} className="mt-4 flex flex-col gap-3 sm:flex-row">
+                      <input
+                        type="email"
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        placeholder="empleado@email.com"
+                        required
+                        className="flex-1 rounded-xl border border-white/10 bg-ink-950 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/30"
+                      />
+                      <button
+                        type="submit"
+                        disabled={teamBusy}
+                        className="rounded-xl px-4 py-2.5 text-sm font-semibold text-ink-950 disabled:opacity-60"
+                        style={{ background: brand }}
+                      >
+                        {teamBusy ? "Enviando…" : "Invitar"}
+                      </button>
+                    </form>
+
+                    {teamMsg ? <p className="mt-3 text-sm text-signal">{teamMsg}</p> : null}
+                    {teamErr ? <p className="mt-3 text-sm text-red-300">{teamErr}</p> : null}
+                    {lastInviteLink ? (
+                      <div className="mt-3 rounded-xl border border-white/10 bg-ink-950/80 px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-zinc-500">Link de invitación</p>
+                        <p className="mt-1 break-all text-xs text-zinc-300">{lastInviteLink}</p>
+                        <button
+                          type="button"
+                          onClick={() => navigator.clipboard?.writeText(lastInviteLink)}
+                          className="mt-2 text-xs font-semibold hover:opacity-80"
+                          style={{ color: brand }}
+                        >
+                          Copiar link
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {members.length > 0 ? (
+                      <div className="mt-5">
+                        <p className="text-xs uppercase tracking-wide text-zinc-500">Miembros</p>
+                        <ul className="mt-2 space-y-2">
+                          {members.map((m) => (
+                            <li
+                              key={m.id}
+                              className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm"
+                            >
+                              <div>
+                                <div className="font-medium text-zinc-100">
+                                  {m.displayName || m.email || m.id}
+                                </div>
+                                <div className="text-xs text-zinc-500">
+                                  {m.role === "owner" ? "Dueño" : "Empleado"}
+                                  {m.email ? ` · ${m.email}` : ""}
+                                </div>
+                              </div>
+                              {m.role === "staff" ? (
+                                <button
+                                  type="button"
+                                  disabled={teamBusy}
+                                  onClick={() => handleRemoveMember(m.id)}
+                                  className="text-xs text-red-300 hover:text-red-200"
+                                >
+                                  Quitar
+                                </button>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {pendingInvites.length > 0 ? (
+                      <div className="mt-5">
+                        <p className="text-xs uppercase tracking-wide text-zinc-500">Pendientes</p>
+                        <ul className="mt-2 space-y-2">
+                          {pendingInvites.map((inv) => (
+                            <li
+                              key={inv.id}
+                              className="flex items-center justify-between rounded-lg border border-dashed border-white/15 bg-black/20 px-3 py-2 text-sm"
+                            >
+                              <span className="text-zinc-300">{inv.email}</span>
+                              <button
+                                type="button"
+                                disabled={teamBusy}
+                                onClick={() => handleRevokeInvite(inv.id)}
+                                className="text-xs text-zinc-500 hover:text-zinc-300"
+                              >
+                                Cancelar
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+
+            {isOwner ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProposeOpen((v) => !v);
+                    setProposeMsg("");
+                    setProposeErr("");
+                  }}
+                  className="group relative w-full overflow-hidden rounded-2xl border border-dashed border-white/20 bg-black/25 px-6 py-6 text-left backdrop-blur-sm transition hover:border-white/35 hover:bg-black/40"
+                >
+                  <div className="absolute inset-y-0 left-0 w-1.5 bg-white/25" />
+                  <div className="pl-3">
+                    <div className="font-display text-xl font-bold text-white">
+                      Proponer una herramienta
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-400">
+                      Ideas, mejoras o algo que te faltaría en Ordino
+                    </div>
+                  </div>
+                </button>
+
+                {proposeOpen ? (
               <form
                 onSubmit={sendProposal}
                 className="rounded-2xl border border-white/10 bg-black/40 px-5 py-5 text-left backdrop-blur-sm"
@@ -637,6 +911,8 @@ export default function GestionarPage() {
                   <p className="mt-3 text-sm text-amber-200">{proposeErr}</p>
                 ) : null}
               </form>
+                ) : null}
+              </>
             ) : null}
           </div>
         </div>

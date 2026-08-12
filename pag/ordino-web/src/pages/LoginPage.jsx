@@ -1,20 +1,44 @@
-import { useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth, firebaseConfigError } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import { getUserProfile } from "../lib/tenants";
+import { acceptTeamInvite, getInviteByToken, isInviteValid } from "../lib/team";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { user, profile, loading, logout, setProfile, setBusiness } = useAuth();
+  const [searchParams] = useSearchParams();
+  const inviteToken = searchParams.get("invite") || "";
+  const { user, profile, loading, logout, setProfile, setBusiness, refreshProfile } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [invitePreview, setInvitePreview] = useState(null);
 
-  // Solo saltear el form si ya está todo listo
-  if (!loading && user && profile?.onboardingCompleted === true) {
+  useEffect(() => {
+    if (!inviteToken) return;
+    let alive = true;
+    (async () => {
+      try {
+        const inv = await getInviteByToken(inviteToken);
+        if (!alive) return;
+        const check = isInviteValid(inv);
+        if (check.ok) {
+          setInvitePreview(inv);
+          setEmail(inv.email || "");
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [inviteToken]);
+
+  if (!loading && user && profile?.onboardingCompleted === true && !inviteToken) {
     return <Navigate to="/gestionar" replace />;
   }
 
@@ -28,11 +52,21 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+
+      if (inviteToken) {
+        await acceptTeamInvite(inviteToken, {
+          uid: cred.user.uid,
+          email: cred.user.email,
+          displayName: cred.user.displayName,
+        });
+        const refreshed = await refreshProfile?.();
+        navigate("/gestionar", { replace: true });
+        void refreshed;
+        return;
+      }
+
       const p = await getUserProfile(cred.user.uid);
       setProfile(p);
-      if (p?.businessId) {
-        // business se refresca en AuthContext en el próximo ciclo; navegamos igual
-      }
       if (p?.onboardingCompleted) {
         navigate("/gestionar", { replace: true });
       } else {
@@ -71,13 +105,15 @@ export default function LoginPage() {
           Ordino
         </Link>
         <h1 className="mt-8 font-display text-3xl font-extrabold tracking-tight">
-          Ingresar
+          {invitePreview ? "Ingresar y unirte" : "Ingresar"}
         </h1>
         <p className="mt-2 text-sm text-zinc-400">
-          Entrá con tu email y contraseña para ir a stock y tienda.
+          {invitePreview
+            ? `Unite a ${invitePreview.businessName} con tu cuenta.`
+            : "Entrá con tu email y contraseña para ir a stock y tienda."}
         </p>
 
-        {!loading && user && profile?.onboardingCompleted !== true ? (
+        {!loading && user && profile?.onboardingCompleted !== true && !inviteToken ? (
           <div className="mt-8 space-y-3 rounded-2xl border border-white/10 bg-ink-900/60 p-6 backdrop-blur">
             <p className="text-sm text-zinc-300">
               Hay una sesión activa ({user.email || "tu cuenta"}), pero todavía no
@@ -111,7 +147,8 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
-              className="mt-1 w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2.5 outline-none focus:border-signal"
+              readOnly={Boolean(invitePreview?.email)}
+              className="mt-1 w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2.5 outline-none focus:border-signal disabled:opacity-70"
               required
             />
           </label>
@@ -138,13 +175,16 @@ export default function LoginPage() {
             disabled={busy}
             className="w-full rounded-xl bg-signal px-4 py-3 font-semibold text-ink-950 hover:bg-signal-soft disabled:opacity-60 transition"
           >
-            {busy ? "Entrando…" : "Ingresar"}
+            {busy ? "Entrando…" : invitePreview ? "Ingresar y unirme" : "Ingresar"}
           </button>
         </form>
 
         <p className="mt-6 text-sm text-zinc-500">
           ¿Primera vez?{" "}
-          <Link to="/register" className="font-medium text-signal hover:text-signal-soft">
+          <Link
+            to={inviteToken ? `/register?invite=${encodeURIComponent(inviteToken)}` : "/register"}
+            className="font-medium text-signal hover:text-signal-soft"
+          >
             Crear cuenta gratis
           </Link>
         </p>

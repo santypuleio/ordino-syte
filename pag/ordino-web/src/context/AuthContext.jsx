@@ -68,6 +68,18 @@ export function AuthProvider({ children }) {
         setBusiness(b);
         return b;
       },
+      refreshProfile: async () => {
+        if (!user?.uid) return null;
+        const p = await getUserProfile(user.uid);
+        setProfile(p);
+        if (p?.businessId) {
+          const b = await getBusiness(p.businessId);
+          setBusiness(b);
+          return { profile: p, business: b };
+        }
+        setBusiness(null);
+        return { profile: p, business: null };
+      },
       logout: async () => {
         if (auth) await signOut(auth);
       },

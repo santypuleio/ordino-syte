@@ -6,6 +6,7 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "./firebase";
+import { ensureOwnerMember } from "./team";
 
 /** Trial Ordino: 1 mes */
 export const TRIAL_DAYS = 30;
@@ -317,6 +318,12 @@ export async function provisionTenant({
     await setDoc(doc(db, "slugs", slug), {
       businessId,
       createdAt: serverTimestamp(),
+    });
+
+    await ensureOwnerMember(businessId, {
+      uid,
+      email,
+      displayName: displayName || brandName.trim(),
     });
   } catch (err) {
     const code = err?.code || "";

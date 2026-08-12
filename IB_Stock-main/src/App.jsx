@@ -201,7 +201,12 @@ function App() {
 
         if (bizSnap.exists()) {
           const biz = { id: bizSnap.id, ...bizSnap.data() }
-          if (biz.ownerId && biz.ownerId !== user.uid && profile?.businessId !== resolvedId) {
+          const memberSnap = await getDoc(doc(db, 'businesses', resolvedId, 'members', user.uid))
+          const isOwner = biz.ownerId === user.uid
+          const isMember = memberSnap.exists()
+          const profileMatches = profile?.businessId === resolvedId
+
+          if (!isOwner && !isMember && !profileMatches) {
             setTenantError('No tenés acceso a este negocio.')
             setBusinessId(null)
             setTenantLoading(false)

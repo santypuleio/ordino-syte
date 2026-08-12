@@ -111,6 +111,7 @@ export default function DashboardPage() {
   }
 
   if (!user) return <Navigate to="/login" replace />;
+  if (profile?.role === "staff") return <Navigate to="/gestionar" replace />;
   if (!profile?.onboardingCompleted) return <Navigate to="/onboarding" replace />;
 
   const stockLink = slug ? stockUrlFor(slug) : "#";

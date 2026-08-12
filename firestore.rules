@@ -9,7 +9,29 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function ownsBusiness(businessId) {
+    function authEmailLower() {
+      return request.auth.token.email.lower();
+    }
+
+    function inviteDoc(token) {
+      return get(/databases/$(database)/documents/invites/$(token)).data;
+    }
+
+    function validStaffInvite(token, businessId) {
+      return token is string
+        && exists(/databases/$(database)/documents/invites/$(token))
+        && inviteDoc(token).status == 'pending'
+        && inviteDoc(token).role == 'staff'
+        && inviteDoc(token).businessId == businessId
+        && inviteDoc(token).email.lower() == authEmailLower();
+    }
+
+    function isBusinessMember(businessId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid));
+    }
+
+    function isBusinessOwner(businessId) {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && userDoc().businessId == businessId
@@ -22,14 +44,48 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid;
     }
 
-    function canManage(businessId) {
-      return ownsBusiness(businessId) || isOwnerField(businessId);
+    // Solo dueño: billing, colores, WhatsApp, invitar
+    function canManageBusiness(businessId) {
+      return isBusinessOwner(businessId) || isOwnerField(businessId);
+    }
+
+    // Dueño o empleado: stock / ventas / compras
+    function canUseStock(businessId) {
+      return isBusinessMember(businessId) || isOwnerField(businessId) || isBusinessOwner(businessId);
     }
 
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
-      allow create: if signedIn() && request.auth.uid == uid;
-      allow update: if signedIn() && request.auth.uid == uid;
+
+      // Owner (onboarding) o staff (aceptar invitación con token válido)
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.businessId is string
+        && request.resource.data.onboardingCompleted == true
+        && (
+          request.resource.data.role == 'owner'
+          || (
+            request.resource.data.role == 'staff'
+            && validStaffInvite(request.resource.data.joinedViaInvite, request.resource.data.businessId)
+          )
+        );
+
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && (
+          // updates normales (mismo negocio / sin volverse staff de otro)
+          (
+            request.resource.data.businessId == resource.data.businessId
+            && request.resource.data.role == resource.data.role
+          )
+          || (
+            // aceptar invitación: pasar a staff de un negocio vía invite
+            request.resource.data.role == 'staff'
+            && request.resource.data.onboardingCompleted == true
+            && validStaffInvite(request.resource.data.joinedViaInvite, request.resource.data.businessId)
+          )
+        );
+
       allow delete: if false;
     }
 
@@ -41,33 +97,73 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Invitaciones: el token es el secreto (lectura pública del doc)
+    match /invites/{token} {
+      allow read: if true;
+      allow create: if signedIn()
+        && canManageBusiness(request.resource.data.businessId)
+        && request.resource.data.email is string
+        && request.resource.data.status == 'pending'
+        && request.resource.data.role == 'staff';
+      allow update: if (
+        canManageBusiness(resource.data.businessId)
+        && request.resource.data.businessId == resource.data.businessId
+      ) || (
+        signedIn()
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'accepted'
+        && authEmailLower() == resource.data.email.lower()
+      );
+      allow delete: if false;
+    }
+
     match /businesses/{businessId} {
       allow read: if true;
       allow create: if signedIn()
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.slug == businessId;
-      allow update: if canManage(businessId);
+      allow update: if canManageBusiness(businessId);
       allow delete: if false;
+
+      match /members/{memberId} {
+        allow read: if canUseStock(businessId);
+        allow create: if signedIn()
+          && request.auth.uid == memberId
+          && (
+            (request.resource.data.role == 'owner' && isOwnerField(businessId))
+            || (
+              request.resource.data.role == 'staff'
+              && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+              && userDoc().businessId == businessId
+              && userDoc().role == 'staff'
+              && request.resource.data.keys().hasAll(['role', 'email'])
+            )
+          );
+        allow delete: if canManageBusiness(businessId)
+          && memberId != request.auth.uid
+          && resource.data.role == 'staff';
+        allow update: if false;
+      }
 
       match /products/{productId} {
         allow read: if true;
-        allow write: if canManage(businessId);
+        allow write: if canUseStock(businessId);
       }
 
       match /sales/{saleId} {
-        allow read: if canManage(businessId);
-        allow create: if canManage(businessId);
+        allow read: if canUseStock(businessId);
+        allow create: if canUseStock(businessId);
         allow update, delete: if false;
       }
 
       match /purchases/{purchaseId} {
-        allow read: if canManage(businessId);
-        allow create: if canManage(businessId);
+        allow read: if canUseStock(businessId);
+        allow create: if canUseStock(businessId);
         allow update, delete: if false;
       }
     }
 
-    // Ideas / feedback de usuarios (solo crear; lectura vía consola admin)
+    // Feedback / proponer herramienta (si ya lo usás en /gestionar)
     match /feedback/{feedbackId} {
       allow create: if signedIn()
         && request.resource.data.uid == request.auth.uid
