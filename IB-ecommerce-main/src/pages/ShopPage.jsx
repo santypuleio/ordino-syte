@@ -2,19 +2,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { fetchProductsFromFirebase } from "../lib/sheets.jsx";
 import { Link } from "react-router-dom";
 import { useTenant } from "../context/TenantContext.jsx";
+import { useCart } from "../context/CartContext.jsx";
+import { CartButton } from "../components/CartDrawer.jsx";
+import { formatARS } from "../lib/whatsapp.js";
 import defaultLogo from "../img/ordino.png";
-
-function formatARS(n) {
-  try {
-    return new Intl.NumberFormat("es-AR", {
-      style: "currency",
-      currency: "ARS",
-      maximumFractionDigits: 0,
-    }).format(n);
-  } catch {
-    return `$ ${n}`;
-  }
-}
 
 export default function ShopPage() {
   const {
@@ -27,6 +18,7 @@ export default function ShopPage() {
     primaryColor,
     subscription,
   } = useTenant();
+  const { addItem } = useCart();
 
   const [items, setItems] = useState([]);
   const [status, setStatus] = useState({ loading: true, error: "" });
@@ -139,6 +131,8 @@ export default function ShopPage() {
               className="w-full rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none"
             />
           </div>
+
+          <CartButton />
         </div>
       </header>
 
@@ -213,54 +207,79 @@ export default function ShopPage() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((p) => (
-              <Link
+              <div
                 key={p.id}
-                to={`${basePath}/producto/${encodeURIComponent(p.id)}`}
                 className="group rounded-2xl border border-zinc-800 bg-zinc-900/30 overflow-hidden hover:bg-zinc-900/40 transition"
               >
-                <div className="aspect-[16/10] bg-zinc-950/40 border-b border-zinc-800 overflow-hidden">
-                  {p.imagen ? (
-                    <img
-                      src={p.imagen}
-                      alt={p.nombre}
-                      className="h-full w-full object-contain object-center group-hover:scale-[1.02] transition"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="h-full w-full grid place-items-center text-zinc-600 text-sm">
-                      Sin imagen
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-sm" style={{ color: accent }}>
-                        {p.categoria}
+                <Link
+                  to={`${basePath}/producto/${encodeURIComponent(p.id)}`}
+                  className="block"
+                >
+                  <div className="aspect-[16/10] bg-zinc-950/40 border-b border-zinc-800 overflow-hidden">
+                    {p.imagen ? (
+                      <img
+                        src={p.imagen}
+                        alt={p.nombre}
+                        className="h-full w-full object-contain object-center group-hover:scale-[1.02] transition"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="h-full w-full grid place-items-center text-zinc-600 text-sm">
+                        Sin imagen
                       </div>
-                      <div className="mt-1 font-semibold leading-tight truncate">{p.nombre}</div>
-                    </div>
-                    <div className="text-sm font-semibold text-white">{formatARS(p.precio)}</div>
+                    )}
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between">
-                    <span
-                      className={[
-                        "text-xs rounded-full px-2 py-1 border",
-                        p.stock > 0
-                          ? "border-zinc-500/40 bg-zinc-200/10 text-zinc-100"
-                          : "border-zinc-700 bg-zinc-950/30 text-zinc-400",
-                      ].join(" ")}
-                    >
-                      {p.stock > 0 ? "Disponible" : "Sin stock"}
-                    </span>
-                    <span className="text-xs" style={{ color: accent }}>
-                      Ver detalle →
-                    </span>
+                  <div className="p-4 pb-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-sm" style={{ color: accent }}>
+                          {p.categoria}
+                        </div>
+                        <div className="mt-1 font-semibold leading-tight truncate">
+                          {p.nombre}
+                        </div>
+                      </div>
+                      <div className="text-sm font-semibold text-white">
+                        {formatARS(p.precio)}
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between">
+                      <span
+                        className={[
+                          "text-xs rounded-full px-2 py-1 border",
+                          p.stock > 0
+                            ? "border-zinc-500/40 bg-zinc-200/10 text-zinc-100"
+                            : "border-zinc-700 bg-zinc-950/30 text-zinc-400",
+                        ].join(" ")}
+                      >
+                        {p.stock > 0 ? "Disponible" : "Sin stock"}
+                      </span>
+                      <span className="text-xs" style={{ color: accent }}>
+                        Ver detalle →
+                      </span>
+                    </div>
                   </div>
+                </Link>
+
+                <div className="px-4 pb-4">
+                  <button
+                    type="button"
+                    disabled={p.stock <= 0}
+                    onClick={() => addItem(p, 1)}
+                    className={[
+                      "w-full rounded-xl px-3 py-2 text-xs font-semibold",
+                      p.stock > 0
+                        ? "text-zinc-950"
+                        : "cursor-not-allowed bg-zinc-800 text-zinc-400",
+                    ].join(" ")}
+                    style={p.stock > 0 ? { background: accent } : undefined}
+                  >
+                    {p.stock > 0 ? "Agregar al carrito" : "Sin stock"}
+                  </button>
                 </div>
-              </Link>
+              </div>
             ))}
           </div>
         )}

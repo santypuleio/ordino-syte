@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { ecommerceUrlFor, getSubscriptionState, stockUrlFor, updateBusinessColors } from "../lib/tenants";
+import { ecommerceUrlFor, getSubscriptionState, stockUrlFor, updateBusinessColors, updateBusinessWhatsapp } from "../lib/tenants";
 import { submitToolProposal } from "../lib/feedback";
 
 function parseHex(hex) {
@@ -47,11 +47,16 @@ export default function GestionarPage() {
 
   const [configOpen, setConfigOpen] = useState(false);
   const [colorsOpen, setColorsOpen] = useState(false);
+  const [whatsappOpen, setWhatsappOpen] = useState(false);
   const [primaryColor, setPrimaryColor] = useState("#111111");
   const [accentColor, setAccentColor] = useState("#e11d48");
+  const [whatsapp, setWhatsapp] = useState("");
   const [saving, setSaving] = useState(false);
+  const [savingWa, setSavingWa] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const [saveErr, setSaveErr] = useState("");
+  const [waMsg, setWaMsg] = useState("");
+  const [waErr, setWaErr] = useState("");
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [pinHint, setPinHint] = useState("");
   const [proposeOpen, setProposeOpen] = useState(false);
@@ -66,7 +71,8 @@ export default function GestionarPage() {
     if (!business) return;
     setPrimaryColor(business.primaryColor || "#111111");
     setAccentColor(business.accentColor || "#e11d48");
-  }, [business?.primaryColor, business?.accentColor, business?.id]);
+    setWhatsapp(business.whatsapp || "");
+  }, [business?.primaryColor, business?.accentColor, business?.whatsapp, business?.id]);
 
   useEffect(() => {
     const onBeforeInstall = (e) => {
@@ -83,6 +89,7 @@ export default function GestionarPage() {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
         setConfigOpen(false);
         setColorsOpen(false);
+        setWhatsappOpen(false);
         setPinHint("");
       }
     };
@@ -165,6 +172,35 @@ export default function GestionarPage() {
     }
   }
 
+  async function saveWhatsapp() {
+    setWaMsg("");
+    setWaErr("");
+    if (!businessId) {
+      setWaErr("No se encontró el negocio.");
+      return;
+    }
+    const digits = String(whatsapp || "").replace(/\D/g, "");
+    if (digits && digits.length < 10) {
+      setWaErr("Ingresá un número válido con código de país (ej. 54911…).");
+      return;
+    }
+    setSavingWa(true);
+    try {
+      await updateBusinessWhatsapp(businessId, digits);
+      setWhatsapp(digits);
+      setBusiness({
+        ...(business || {}),
+        id: businessId,
+        whatsapp: digits,
+      });
+      setWaMsg(digits ? "WhatsApp guardado." : "WhatsApp eliminado.");
+    } catch (err) {
+      setWaErr(err?.message || "No se pudo guardar el WhatsApp.");
+    } finally {
+      setSavingWa(false);
+    }
+  }
+
   async function pinToHome() {
     setPinHint("");
     if (isStandalone()) {
@@ -233,9 +269,12 @@ export default function GestionarPage() {
                 onClick={() => {
                   setConfigOpen((v) => !v);
                   setColorsOpen(false);
+                  setWhatsappOpen(false);
                   setPinHint("");
                   setSaveMsg("");
                   setSaveErr("");
+                  setWaMsg("");
+                  setWaErr("");
                 }}
                 className={`inline-flex items-center gap-1.5 transition ${
                   configOpen ? "text-white" : "text-zinc-500 hover:text-zinc-300"
@@ -263,13 +302,75 @@ export default function GestionarPage() {
               {configOpen ? (
                 <div
                   role="menu"
-                  className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-xl border border-white/10 bg-[#121212] shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+                  className="absolute right-0 z-50 mt-2 w-72 overflow-hidden rounded-xl border border-white/10 bg-[#121212] shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
                 >
                   <button
                     type="button"
                     role="menuitem"
-                    onClick={() => setColorsOpen((v) => !v)}
+                    onClick={() => {
+                      setWhatsappOpen((v) => !v);
+                      setColorsOpen(false);
+                    }}
                     className="flex w-full items-center justify-between px-4 py-3.5 text-left text-sm text-zinc-200 hover:bg-white/5"
+                  >
+                    <span>WhatsApp de pedidos</span>
+                    <span className="flex items-center gap-2 text-xs text-zinc-500">
+                      {whatsapp ? "Configurado" : "Sin número"}
+                      <svg
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        className={`h-3.5 w-3.5 transition-transform ${
+                          whatsappOpen ? "rotate-180" : ""
+                        }`}
+                        aria-hidden
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </span>
+                  </button>
+
+                  {whatsappOpen ? (
+                    <div className="border-t border-white/10 bg-black/40 px-4 py-3">
+                      <label className="block text-xs text-zinc-400">
+                        Número (con código de país)
+                        <input
+                          type="tel"
+                          inputMode="tel"
+                          value={whatsapp}
+                          onChange={(e) => setWhatsapp(e.target.value)}
+                          placeholder="5491123456789"
+                          className="mt-1.5 w-full rounded-lg border border-white/10 bg-ink-950 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-white/30"
+                        />
+                      </label>
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500">
+                        Acá llegan los pedidos del carrito de tu tienda. Ej: 54911…
+                      </p>
+                      <button
+                        type="button"
+                        disabled={savingWa}
+                        onClick={saveWhatsapp}
+                        className="mt-3 w-full rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                        style={{ background: brand }}
+                      >
+                        {savingWa ? "Guardando…" : "Guardar WhatsApp"}
+                      </button>
+                      {waMsg && <p className="mt-2 text-xs text-signal">{waMsg}</p>}
+                      {waErr && <p className="mt-2 text-xs text-red-300">{waErr}</p>}
+                    </div>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setColorsOpen((v) => !v);
+                      setWhatsappOpen(false);
+                    }}
+                    className="flex w-full items-center justify-between border-t border-white/10 px-4 py-3.5 text-left text-sm text-zinc-200 hover:bg-white/5"
                   >
                     <span>Colores</span>
                     <span className="flex items-center gap-2">

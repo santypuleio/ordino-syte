@@ -246,6 +246,20 @@ export async function updateBusinessColors(businessId, { primaryColor, accentCol
   );
 }
 
+/** Guarda el WhatsApp de pedidos (solo dígitos recomendado, ej. 54911…). */
+export async function updateBusinessWhatsapp(businessId, whatsapp) {
+  if (!db || !businessId) return;
+  const cleaned = String(whatsapp || "").trim();
+  await setDoc(
+    doc(db, "businesses", businessId),
+    {
+      whatsapp: cleaned,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
 /**
  * Crea tenant + slug + user profile. businessId === slug en v1.
  */

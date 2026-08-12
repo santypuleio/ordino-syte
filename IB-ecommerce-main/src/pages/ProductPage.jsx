@@ -2,23 +2,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { fetchProductsFromFirebase } from "../lib/sheets.jsx";
 import { useTenant } from "../context/TenantContext.jsx";
-
-function formatARS(n) {
-  try {
-    return new Intl.NumberFormat("es-AR", {
-      style: "currency",
-      currency: "ARS",
-      maximumFractionDigits: 0,
-    }).format(n);
-  } catch {
-    return `$ ${n}`;
-  }
-}
-
-function normalizeWhatsApp(raw) {
-  const digits = String(raw || "").replace(/\D/g, "");
-  return digits || "5491121826396";
-}
+import { useCart } from "../context/CartContext.jsx";
+import { CartButton } from "../components/CartDrawer.jsx";
+import {
+  buildProductWhatsAppMessage,
+  buildWhatsAppLink,
+  formatARS,
+} from "../lib/whatsapp.js";
 
 export default function ProductPage() {
   const { id } = useParams();
@@ -31,9 +21,11 @@ export default function ProductPage() {
     primaryColor,
     whatsapp,
   } = useTenant();
+  const { addItem } = useCart();
 
   const [items, setItems] = useState([]);
   const [status, setStatus] = useState({ loading: true, error: "" });
+  const [qty, setQty] = useState(1);
 
   const basePath = slug ? `/t/${encodeURIComponent(slug)}` : "";
   const accent = primaryColor || "#10b981";
@@ -66,16 +58,13 @@ export default function ProductPage() {
     return items.find((p) => String(p.id) === String(id));
   }, [items, id]);
 
-  const waLink = useMemo(() => {
-    if (!product) return "#";
-    const msg = [
-      "Hola! Quiero comprar / consultar este producto:",
-      `• ${product.nombre}`,
-      `• Precio: ${formatARS(product.precio)}`,
-      `• Stock: ${product.stock}`,
-    ].join("\n");
+  useEffect(() => {
+    setQty(1);
+  }, [product?.id]);
 
-    return `https://wa.me/${normalizeWhatsApp(whatsapp)}?text=${encodeURIComponent(msg)}`;
+  const waLink = useMemo(() => {
+    if (!product) return null;
+    return buildWhatsAppLink(whatsapp, buildProductWhatsAppMessage(product));
   }, [product, whatsapp]);
 
   if (tenantLoading || status.loading) {
@@ -122,15 +111,16 @@ export default function ProductPage() {
   }
 
   const inStock = product.stock > 0;
+  const maxQty = Math.max(1, Number(product.stock) || 1);
 
   return (
     <div>
       <header className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur">
-        <div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between">
+        <div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between gap-3">
           <Link to={basePath || "/"} className="text-sm hover:opacity-80" style={{ color: accent }}>
             ← Volver
           </Link>
-          <div className="text-xs text-zinc-500">Producto</div>
+          <CartButton />
         </div>
       </header>
 
@@ -178,20 +168,63 @@ export default function ProductPage() {
               <p className="mt-4 text-sm text-zinc-400">(Sin descripción)</p>
             )}
 
+            {inStock ? (
+              <div className="mt-5 flex items-center gap-3">
+                <span className="text-xs text-zinc-400">Cantidad</span>
+                <div className="inline-flex items-center rounded-lg border border-zinc-700">
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-800"
+                    onClick={() => setQty((q) => Math.max(1, q - 1))}
+                    aria-label="Menos"
+                  >
+                    −
+                  </button>
+                  <span className="min-w-[2rem] text-center text-sm">{qty}</span>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+                    disabled={qty >= maxQty}
+                    onClick={() => setQty((q) => Math.min(maxQty, q + 1))}
+                    aria-label="Más"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <div className="mt-6 flex flex-wrap gap-3">
-              <a
-                href={waLink}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                type="button"
+                disabled={!inStock}
+                onClick={() => addItem(product, qty)}
                 className={[
                   "inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold",
                   inStock
                     ? "text-zinc-950"
-                    : "bg-zinc-800 text-zinc-300 cursor-not-allowed pointer-events-none",
+                    : "bg-zinc-800 text-zinc-300 cursor-not-allowed",
                 ].join(" ")}
                 style={inStock ? { background: accent } : undefined}
               >
-                Comprar por WhatsApp
+                Agregar al carrito
+              </button>
+
+              <a
+                href={waLink || "#"}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => {
+                  if (!waLink || !inStock) e.preventDefault();
+                }}
+                className={[
+                  "inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-semibold",
+                  inStock && waLink
+                    ? "border-zinc-700 text-zinc-100 hover:bg-zinc-900/50"
+                    : "border-zinc-800 bg-zinc-950/30 text-zinc-500 cursor-not-allowed pointer-events-none",
+                ].join(" ")}
+              >
+                Comprar solo este por WhatsApp
               </a>
 
               <Link
