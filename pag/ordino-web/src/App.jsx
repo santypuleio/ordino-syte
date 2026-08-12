@@ -7,6 +7,9 @@ import OnboardingPage from "./pages/OnboardingPage";
 import GestionarPage from "./pages/GestionarPage";
 import DashboardPage from "./pages/DashboardPage";
 import JoinPage from "./pages/JoinPage";
+import TermsPage from "./pages/TermsPage";
+import PrivacyPage from "./pages/PrivacyPage";
+import CancelPage from "./pages/CancelPage";
 
 export default function App() {
   return (
@@ -20,6 +23,9 @@ export default function App() {
           <Route path="/onboarding" element={<OnboardingPage />} />
           <Route path="/gestionar" element={<GestionarPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/terminos" element={<TermsPage />} />
+          <Route path="/privacidad" element={<PrivacyPage />} />
+          <Route path="/cancelar" element={<CancelPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

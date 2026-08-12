@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
+import { SiteFooter } from "./components/Support";
 
 /**
  * Landing SaaS Ordino — registro → stock + ecommerce automáticos
@@ -267,25 +268,7 @@ export default function OrdinoLanding() {
         </section>
       </main>
 
-      <footer className="relative z-10 border-t border-white/5 py-10">
-        <div className="mx-auto flex max-w-5xl flex-col items-start justify-between gap-4 px-4 sm:flex-row sm:items-center">
-          <div className="font-display text-lg font-bold text-white">Ordino</div>
-          <div className="flex flex-wrap gap-4 text-sm text-zinc-500">
-            <a href="#nosotros" className="hover:text-zinc-300">
-              Quiénes somos
-            </a>
-            <a href="mailto:ordino.ar@gmail.com" className="hover:text-zinc-300">
-              ordino.ar@gmail.com
-            </a>
-            <Link to="/login" className="hover:text-zinc-300">
-              Ingresar
-            </Link>
-            <Link to="/register" className="hover:text-zinc-300">
-              Crear cuenta
-            </Link>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

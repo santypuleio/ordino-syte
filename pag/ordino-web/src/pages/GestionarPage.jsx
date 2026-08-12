@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ecommerceUrlFor, getSubscriptionState, stockUrlFor, updateBusinessColors, updateBusinessWhatsapp } from "../lib/tenants";
 import { submitToolProposal } from "../lib/feedback";
+import { SupportLinks } from "../components/Support";
 import {
   createTeamInvite,
   isOwnerRole,
@@ -919,6 +920,22 @@ export default function GestionarPage() {
                 ) : null}
               </>
             ) : null}
+          </div>
+
+          <div className="mt-10 border-t border-white/10 pt-6 text-center">
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Soporte</p>
+            <SupportLinks className="mt-2 justify-center" />
+            <div className="mt-3 flex flex-wrap justify-center gap-3 text-xs text-zinc-600">
+              <Link to="/terminos" className="hover:text-zinc-400">
+                Términos
+              </Link>
+              <Link to="/privacidad" className="hover:text-zinc-400">
+                Privacidad
+              </Link>
+              <Link to="/cancelar" className="hover:text-zinc-400">
+                Cómo cancelar
+              </Link>
+            </div>
           </div>
         </div>
       </div>

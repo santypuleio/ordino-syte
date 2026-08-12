@@ -3,6 +3,10 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# Avisos de trial / pago fallido (1 vez al día)
+[functions."check-trial-emails"]
+  schedule = "@daily"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

@@ -1,7 +1,6 @@
 const { getFirestore } = require("./lib/firebaseAdmin.cjs");
+const { sendMail } = require("./lib/mail.cjs");
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-const FROM_EMAIL = process.env.INVITE_FROM_EMAIL || "Ordino <onboarding@resend.dev>";
 const LANDING_URL = (process.env.URL || "https://ordino-ar.netlify.app").replace(/\/$/, "");
 
 async function verifyOwner(idToken, businessId) {
@@ -28,35 +27,6 @@ async function verifyOwner(idToken, businessId) {
   );
 }
 
-async function sendViaResend({ to, businessName, joinUrl, inviterEmail }) {
-  if (!RESEND_API_KEY) return null;
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: FROM_EMAIL,
-      to: [to],
-      subject: `Te invitaron a ${businessName} en Ordino`,
-      html: `
-        <p>Hola,</p>
-        <p><strong>${inviterEmail || "Un dueño de negocio"}</strong> te invitó a colaborar en <strong>${businessName}</strong> usando Ordino.</p>
-        <p>Con tu cuenta vas a poder usar el gestor de stock de la marca.</p>
-        <p><a href="${joinUrl}">Aceptar invitación y crear cuenta</a></p>
-        <p style="color:#666;font-size:12px;">Si el botón no funciona, copiá este link:<br>${joinUrl}</p>
-        <p style="color:#666;font-size:12px;">El link vence en 7 días.</p>
-      `,
-    }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text.slice(0, 200) || "Resend error");
-  }
-  return true;
-}
-
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
@@ -67,7 +37,7 @@ exports.handler = async (event) => {
     const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
 
     const body = JSON.parse(event.body || "{}");
-    const { token, email, businessName, businessId, joinUrl } = body;
+    const { token, email, businessName, businessId, joinUrl, inviterEmail } = body;
 
     if (!token || !email || !businessId) {
       return {
@@ -82,29 +52,37 @@ exports.handler = async (event) => {
     }
 
     const url = joinUrl || `${LANDING_URL}/join/${encodeURIComponent(token)}`;
+    const name = businessName || businessId;
 
-    if (RESEND_API_KEY) {
-      await sendViaResend({
+    try {
+      await sendMail({
         to: email,
-        businessName: businessName || businessId,
-        joinUrl: url,
-        inviterEmail: body.inviterEmail || "",
+        subject: `Te invitaron a ${name} en Ordino`,
+        html: `
+          <p>Hola,</p>
+          <p><strong>${inviterEmail || "Un dueño de negocio"}</strong> te invitó a colaborar en <strong>${name}</strong> usando Ordino.</p>
+          <p>Con tu cuenta vas a poder usar el gestor de stock de la marca.</p>
+          <p><a href="${url}">Aceptar invitación y crear cuenta</a></p>
+          <p style="color:#666;font-size:12px;">Si el botón no funciona, copiá este link:<br>${url}</p>
+          <p style="color:#666;font-size:12px;">El link vence en 7 días.</p>
+        `,
       });
       return {
         statusCode: 200,
         body: JSON.stringify({ ok: true, via: "email", joinUrl: url }),
       };
+    } catch (mailErr) {
+      console.warn("send-team-invite mail:", mailErr.message);
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          ok: true,
+          via: "link",
+          joinUrl: url,
+          message: mailErr.message || "No se pudo enviar el email; usá el link.",
+        }),
+      };
     }
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        ok: true,
-        via: "link",
-        joinUrl: url,
-        message: "Configurá RESEND_API_KEY para enviar emails automáticos.",
-      }),
-    };
   } catch (err) {
     console.error("send-team-invite:", err);
     return {

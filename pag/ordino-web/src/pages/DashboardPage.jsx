@@ -8,6 +8,8 @@ import {
   PLAN_PRICE_USD,
   stockUrlFor,
 } from "../lib/tenants";
+import { SupportLinks } from "../components/Support";
+import { SUPPORT_EMAIL, supportWhatsAppLink } from "../lib/support";
 
 function formatArs(amount) {
   return new Intl.NumberFormat("es-AR", {
@@ -227,13 +229,24 @@ export default function DashboardPage() {
               <div className="text-xs text-zinc-500">{user.email}</div>
             </div>
           </div>
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link to="/gestionar" className="text-zinc-400 hover:text-zinc-200">
               Gestionar
             </Link>
-            <Link to="/" className="text-zinc-400 hover:text-zinc-200">
-              Landing
+            <Link to="/cancelar" className="text-zinc-500 hover:text-zinc-300">
+              Cómo cancelar
             </Link>
+            <a
+              href={supportWhatsAppLink("Hola Ordino, necesito ayuda con mi suscripción.")}
+              target="_blank"
+              rel="noreferrer"
+              className="text-zinc-500 hover:text-zinc-300"
+            >
+              WhatsApp
+            </a>
+            <a href={`mailto:${SUPPORT_EMAIL}`} className="text-zinc-500 hover:text-zinc-300">
+              Email
+            </a>
             <button
               type="button"
               onClick={() => logout()}
@@ -417,6 +430,25 @@ export default function DashboardPage() {
             <div className="mt-2 text-xl font-semibold">Abrir tienda</div>
             <div className="mt-2 text-xs text-emerald-300/90 break-all">{shopLink}</div>
           </a>
+        </section>
+
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-5">
+          <div className="text-xs uppercase tracking-wide text-zinc-500">Soporte</div>
+          <p className="mt-2 text-sm text-zinc-400">
+            ¿Problemas con el pago, el trial o el acceso? Escribinos.
+          </p>
+          <SupportLinks className="mt-3" />
+          <div className="mt-3 flex flex-wrap gap-3 text-xs text-zinc-500">
+            <Link to="/terminos" className="hover:text-zinc-300">
+              Términos
+            </Link>
+            <Link to="/privacidad" className="hover:text-zinc-300">
+              Privacidad
+            </Link>
+            <Link to="/cancelar" className="hover:text-zinc-300">
+              Cómo cancelar
+            </Link>
+          </div>
         </section>
       </main>
     </div>

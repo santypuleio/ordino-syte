@@ -170,6 +170,13 @@ export default function OnboardingPage() {
       });
 
       navigate("/gestionar", { replace: true });
+
+      // Bienvenida (no bloquea el flujo si falla / mail no configurado)
+      import("../lib/mailClient")
+        .then(({ requestLifecycleEmail }) =>
+          requestLifecycleEmail("welcome", { businessId: result.businessId })
+        )
+        .catch(() => {});
     } catch (err) {
       const msg = err?.message || "No se pudo crear tu negocio";
       if (String(msg).includes("already") || String(msg).toLowerCase().includes("en uso")) {

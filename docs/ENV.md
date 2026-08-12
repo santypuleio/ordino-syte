@@ -46,6 +46,18 @@ Topics recomendados:
 - `subscription_authorized_payment`
 - `payment` (opcional)
 
+### Email (Gmail recomendado)
+
+En el site **ordino-ar**:
+
+```
+GMAIL_USER=ordino.ar@gmail.com
+GMAIL_APP_PASSWORD=          # Contraseña de aplicaciones (Google)
+MAIL_FROM_NAME=Ordino
+```
+
+Guía: `docs/EMAIL_SETUP.md`. Alternativa: `RESEND_API_KEY`.
+
 ### Stripe (deshabilitado en UI por ahora)
 
 Las funciones `create-checkout` / `stripe-webhook` siguen en el repo por si más adelante sumás USD, pero el dashboard usa solo Mercado Pago.
