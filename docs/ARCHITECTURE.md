@@ -42,6 +42,7 @@ businesses/{businessId}          # businessId === slug (v1)
 
   createdAt, updatedAt
   products/{productId}           # fuente única stock ↔ ecommerce
+    # barcode?: string | null     # opcional; único por negocio (validado en app)
   sales/{saleId}
   purchases/{purchaseId}
 

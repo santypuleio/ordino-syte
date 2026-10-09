@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth'
 import {
@@ -14,6 +14,13 @@ import {
 import './App.css'
 import { auth, db, firebaseConfigError } from './firebase'
 import { getSubscriptionState, subscriptionCheckoutUrl } from './lib/billing'
+import {
+  findDuplicateBarcode,
+  isValidBarcodeFormat,
+  normalizeBarcode,
+  resolveSaleBarcodeScan,
+} from './lib/barcode'
+import BarcodeCameraScanner from './components/BarcodeCameraScanner'
 
 const LANDING_URL = (import.meta.env.VITE_LANDING_APP_URL || '').replace(/\/$/, '')
 
@@ -61,6 +68,7 @@ const emptyForm = {
   categoria: '',
   imagenUrl: '',
   descripcion: '',
+  barcode: '',
 }
 
 const formatDate = (date = new Date()) => date.toISOString().split('T')[0]
@@ -124,6 +132,12 @@ function App() {
   const [subscription, setSubscription] = useState({ active: true, label: '', status: 'trial' })
   const [tenantError, setTenantError] = useState('')
   const [tenantLoading, setTenantLoading] = useState(false)
+  const [barcodeError, setBarcodeError] = useState('')
+  const [saleBarcode, setSaleBarcode] = useState('')
+  const [scanFeedback, setScanFeedback] = useState(null)
+  const [cameraScannerTarget, setCameraScannerTarget] = useState(null) // 'product' | 'sale' | null
+  const saleBarcodeRef = useRef(null)
+  const scanFeedbackTimer = useRef(null)
 
   const title = editingId ? 'Editar producto' : 'Agregar producto'
   const buttonLabel = editingId ? 'Guardar cambios' : 'Agregar producto'
@@ -260,6 +274,7 @@ function App() {
           stock: Number(data.stock ?? 0),
           ingreso: data.ingreso != null ? Number(data.ingreso) : undefined,
           egreso: data.egreso != null ? Number(data.egreso) : undefined,
+          barcode: data.barcode != null ? String(data.barcode) : '',
         }
       })
       setProducts(items)
@@ -436,13 +451,36 @@ function App() {
     setForm(emptyForm)
     setEditingId(null)
     setIsFormOpen(false)
+    setBarcodeError('')
   }
 
   const resetSaleForm = () => {
     setSaleForm(emptySaleForm)
     setSaleDate(formatDate())
     setIsSaleFormOpen(false)
+    setSaleBarcode('')
+    setScanFeedback(null)
   }
+
+  const showScanFeedback = (type, message) => {
+    if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current)
+    setScanFeedback({ type, message })
+    scanFeedbackTimer.current = setTimeout(() => setScanFeedback(null), 1400)
+  }
+
+  useEffect(() => {
+    if (!isSaleFormOpen) return undefined
+    const id = requestAnimationFrame(() => {
+      saleBarcodeRef.current?.focus()
+    })
+    return () => cancelAnimationFrame(id)
+  }, [isSaleFormOpen])
+
+  useEffect(() => {
+    return () => {
+      if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current)
+    }
+  }, [])
 
   const resetPurchaseForm = () => {
     setPurchaseForm(emptyPurchaseForm)
@@ -452,6 +490,7 @@ function App() {
 
   const handleInputChange = (event) => {
     const { name, value } = event.target
+    if (name === 'barcode') setBarcodeError('')
     setForm((prev) => ({ ...prev, [name]: value }))
   }
 
@@ -462,6 +501,7 @@ function App() {
     const ingreso = form.ingreso === '' ? 0 : Number(form.ingreso)
     const egreso = form.egreso === '' ? 0 : Number(form.egreso)
     const precio = Number(form.precio)
+    const barcode = normalizeBarcode(form.barcode)
 
     if (
       !form.producto.trim() ||
@@ -477,6 +517,17 @@ function App() {
       egreso < 0 ||
       precio < 0
     ) {
+      return
+    }
+
+    if (!isValidBarcodeFormat(barcode)) {
+      setBarcodeError('Código inválido. Usá letras, números o - . /')
+      return
+    }
+
+    const duplicate = findDuplicateBarcode(products, barcode, editingId)
+    if (duplicate) {
+      setBarcodeError(`Ya está asociado a “${duplicate.producto}”`)
       return
     }
 
@@ -499,6 +550,7 @@ function App() {
       stock: getStock(normalizedProduct.ingreso, normalizedProduct.egreso),
       ingreso: normalizedProduct.ingreso,
       egreso: normalizedProduct.egreso,
+      barcode: barcode || null,
       lowStockThreshold: 10,
       active: true,
       updatedAt: new Date(),
@@ -519,14 +571,16 @@ function App() {
   const handleEdit = (product) => {
     setEditingId(product.id)
     setIsFormOpen(true)
+    setBarcodeError('')
     setForm({
       producto: product.producto,
-      ingreso: String(product.ingreso),
-      egreso: String(product.egreso),
+      ingreso: String(product.ingreso ?? 0),
+      egreso: String(product.egreso ?? 0),
       precio: String(product.precio),
       categoria: product.categoria,
       imagenUrl: product.imagenUrl,
       descripcion: product.descripcion,
+      barcode: product.barcode ? String(product.barcode) : '',
     })
   }
 
@@ -541,7 +595,55 @@ function App() {
   const handleOpenCreate = () => {
     setEditingId(null)
     setForm(emptyForm)
+    setBarcodeError('')
     setIsFormOpen(true)
+  }
+
+  const applySaleBarcode = (raw) => {
+    const result = resolveSaleBarcodeScan(productsWithComputedFields, saleForm.items, raw)
+    setSaleBarcode('')
+
+    if (!result.ok) {
+      if (result.reason === 'empty') return
+      if (result.reason === 'not_found') {
+        showScanFeedback('error', 'Código no registrado')
+      } else if (result.reason === 'stock_limit') {
+        showScanFeedback('error', 'Sin stock suficiente')
+      } else if (result.reason === 'invalid') {
+        showScanFeedback('error', 'Código inválido')
+      }
+      requestAnimationFrame(() => saleBarcodeRef.current?.focus())
+      return
+    }
+
+    setSaleForm((prev) => ({ ...prev, items: result.items }))
+    showScanFeedback('success', 'Producto agregado')
+    requestAnimationFrame(() => saleBarcodeRef.current?.focus())
+  }
+
+  const handleSaleBarcodeKeyDown = (event) => {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    applySaleBarcode(saleBarcode)
+  }
+
+  const handleCameraDetected = (rawCode) => {
+    if (cameraScannerTarget === 'product') {
+      setBarcodeError('')
+      setForm((prev) => ({ ...prev, barcode: normalizeBarcode(rawCode) }))
+      return
+    }
+    if (cameraScannerTarget === 'sale') {
+      applySaleBarcode(rawCode)
+    }
+  }
+
+  const handleOpenSale = () => {
+    setSaleDate(formatDate())
+    setSaleForm(emptySaleForm)
+    setSaleBarcode('')
+    setScanFeedback(null)
+    setIsSaleFormOpen(true)
   }
 
   const handleSaleChange = (event) => {
@@ -555,7 +657,9 @@ function App() {
         if (itemIndex !== index) return item
 
         if (field === 'productoId') {
-          const selected = productsWithComputedFields.find((product) => product.id === Number(value))
+          const selected = productsWithComputedFields.find(
+            (product) => String(product.id) === String(value),
+          )
           return {
             ...item,
             productoId: value,
@@ -579,12 +683,6 @@ function App() {
       if (prev.items.length === 1) return prev
       return { ...prev, items: prev.items.filter((_, itemIndex) => itemIndex !== index) }
     })
-  }
-
-  const handleOpenSale = () => {
-    setSaleDate(formatDate())
-    setSaleForm(emptySaleForm)
-    setIsSaleFormOpen(true)
   }
 
   const handlePurchaseItemChange = (index, field, value) => {
@@ -1443,6 +1541,49 @@ function App() {
                   required
                 />
               </label>
+              <div className="full-width barcode-field barcode-field-optional">
+                <span className="barcode-field-label">
+                  <span className="barcode-icon barcode-icon-muted" aria-hidden="true">
+                    <svg width="16" height="12" viewBox="0 0 18 14" fill="none">
+                      <path
+                        d="M1 1v12M3.5 1v12M5 1v12M8 1v12M9.5 1v12M12.5 1v12M14 1v12M17 1v12"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </span>
+                  Código de barras (opcional)
+                </span>
+                <div className="barcode-input-row">
+                  <input
+                    name="barcode"
+                    value={form.barcode}
+                    onChange={handleInputChange}
+                    placeholder="Escaneá o ingresá un código"
+                    autoComplete="off"
+                    inputMode="text"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-small barcode-scan-btn"
+                    onClick={() => setCameraScannerTarget('product')}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path
+                        d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                      <circle cx="12" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.8" />
+                    </svg>
+                    <span className="barcode-scan-btn-text">Escanear</span>
+                  </button>
+                </div>
+                <p className="field-help">Podés dejarlo vacío y cargar el producto normalmente.</p>
+                {barcodeError ? <span className="field-error">{barcodeError}</span> : null}
+              </div>
 
               <div className="form-actions full-width">
                 <button type="submit" className="btn btn-primary">
@@ -1475,7 +1616,9 @@ function App() {
                 Cliente
                 <input name="cliente" value={saleForm.cliente} onChange={handleSaleChange} required />
               </label>
-              <div className="full-width sale-items">
+              <div className="full-width sale-products-section">
+                <p className="sale-section-title">Agregar productos</p>
+                <div className="sale-items">
                 {saleForm.items.map((item, index) => {
                   const selected = productsWithComputedFields.find((product) => product.id === item.productoId)
                   const unitPrice = selected ? selected.precio : 0
@@ -1493,7 +1636,7 @@ function App() {
                           }
                           required
                         >
-                          <option value="">Seleccionar producto</option>
+                          <option value="">Buscar / seleccionar producto</option>
                           {productsWithComputedFields.map((product) => (
                             <option key={product.id} value={product.id} disabled={product.stock === 0}>
                               {product.producto} ({product.stock} disponibles)
@@ -1536,6 +1679,51 @@ function App() {
                 <button type="button" className="btn btn-secondary add-line-btn" onClick={handleAddSaleItem}>
                   Agregar otro producto
                 </button>
+                </div>
+
+                <div className="sale-scan-zone">
+                  <p className="sale-scan-alt-label">También podés escanear un código</p>
+                  <div className="barcode-input-row">
+                    <input
+                      ref={saleBarcodeRef}
+                      value={saleBarcode}
+                      onChange={(event) => setSaleBarcode(event.target.value)}
+                      onKeyDown={handleSaleBarcodeKeyDown}
+                      placeholder="Escaneá o ingresá un código"
+                      autoComplete="off"
+                      inputMode="text"
+                      className="sale-scan-input"
+                      aria-label="Escanear producto"
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-small barcode-scan-btn"
+                      onClick={() => setCameraScannerTarget('sale')}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path
+                          d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                        <circle cx="12" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.8" />
+                      </svg>
+                      <span className="barcode-scan-btn-text">Escanear</span>
+                    </button>
+                  </div>
+                  {scanFeedback ? (
+                    <p
+                      className={`scan-feedback scan-feedback-${scanFeedback.type}`}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {scanFeedback.message}
+                    </p>
+                  ) : (
+                    <p className="sale-scan-hint">Atajo opcional: escaneá con la cámara o un lector.</p>
+                  )}
+                </div>
               </div>
               <div className="form-actions full-width">
                 <button type="submit" className="btn btn-primary">
@@ -1650,6 +1838,12 @@ function App() {
       )}
         </>
       )}
+
+      <BarcodeCameraScanner
+        open={cameraScannerTarget != null}
+        onDetected={handleCameraDetected}
+        onClose={() => setCameraScannerTarget(null)}
+      />
     </main>
   )
 }
