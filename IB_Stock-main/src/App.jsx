@@ -10,6 +10,7 @@ import {
   onSnapshot,
   runTransaction,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore'
 import './App.css'
 import { auth, db, firebaseConfigError } from './firebase'
@@ -21,6 +22,9 @@ import {
   resolveSaleBarcodeScan,
 } from './lib/barcode'
 import BarcodeCameraScanner from './components/BarcodeCameraScanner'
+import ProductImportWizard from './components/ProductImportWizard'
+import ProductCompletionHint from './components/ProductCompletionHint'
+import { getProductCompletionStatus } from './lib/productCompletion'
 
 const LANDING_URL = (import.meta.env.VITE_LANDING_APP_URL || '').replace(/\/$/, '')
 
@@ -136,6 +140,8 @@ function App() {
   const [saleBarcode, setSaleBarcode] = useState('')
   const [scanFeedback, setScanFeedback] = useState(null)
   const [cameraScannerTarget, setCameraScannerTarget] = useState(null) // 'product' | 'sale' | null
+  const [importOpen, setImportOpen] = useState(false)
+  const [showOnlyToComplete, setShowOnlyToComplete] = useState(false)
   const saleBarcodeRef = useRef(null)
   const scanFeedbackTimer = useRef(null)
 
@@ -164,6 +170,20 @@ function App() {
       return { ...product, ingreso, egreso, stock, analisis: getAnalisis(stock) }
     })
   }, [products, purchasesByProduct, salesByProduct])
+
+  const productsToCompleteCount = useMemo(
+    () => productsWithComputedFields.filter((product) => getProductCompletionStatus(product).show).length,
+    [productsWithComputedFields],
+  )
+
+  const stockListProducts = useMemo(() => {
+    if (!showOnlyToComplete) return productsWithComputedFields
+    return productsWithComputedFields.filter((product) => getProductCompletionStatus(product).show)
+  }, [productsWithComputedFields, showOnlyToComplete])
+
+  useEffect(() => {
+    if (productsToCompleteCount === 0 && showOnlyToComplete) setShowOnlyToComplete(false)
+  }, [productsToCompleteCount, showOnlyToComplete])
 
   useEffect(() => {
     if (!auth) return undefined
@@ -597,6 +617,40 @@ function App() {
     setForm(emptyForm)
     setBarcodeError('')
     setIsFormOpen(true)
+  }
+
+  const handleImportProducts = async (readyProducts) => {
+    if (!assertCanWrite()) {
+      throw new Error('No tenés permiso para importar productos en este comercio.')
+    }
+    const col = collection(db, 'businesses', businessId, 'products')
+    const chunkSize = 400
+    let added = 0
+    for (let index = 0; index < readyProducts.length; index += chunkSize) {
+      const slice = readyProducts.slice(index, index + chunkSize)
+      const batch = writeBatch(db)
+      slice.forEach((item) => {
+        batch.set(doc(col), {
+          title: item.title,
+          category: item.category,
+          description: item.description,
+          imageUrl: item.imageUrl,
+          price: item.price,
+          stock: item.stock,
+          ingreso: item.stock,
+          egreso: 0,
+          barcode: item.barcode || null,
+          lowStockThreshold: 10,
+          active: true,
+          updatedAt: new Date(),
+          createdAt: new Date(),
+          createdBy: user?.uid ?? null,
+        })
+      })
+      await batch.commit()
+      added += slice.length
+    }
+    return { added }
   }
 
   const applySaleBarcode = (raw) => {
@@ -1107,10 +1161,24 @@ function App() {
             <div>
               <h2>Stock de productos</h2>
               <p className="section-help">Vista general del inventario con acciones rapidas.</p>
+              {productsToCompleteCount > 0 ? (
+                <button
+                  type="button"
+                  className={`completion-filter${showOnlyToComplete ? ' is-on' : ''}`}
+                  onClick={() => setShowOnlyToComplete((value) => !value)}
+                >
+                  {showOnlyToComplete ? 'Ver todos' : 'Para completar'}
+                </button>
+              ) : null}
             </div>
-            <button type="button" className="btn btn-primary" onClick={handleOpenCreate}>
-              Agregar producto
-            </button>
+            <div className="card-header-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setImportOpen(true)}>
+                Importar productos
+              </button>
+              <button type="button" className="btn btn-primary" onClick={handleOpenCreate}>
+                Agregar producto
+              </button>
+            </div>
           </div>
           <div className="table-wrap desktop-table">
             <table>
@@ -1127,8 +1195,8 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {productsWithComputedFields.length > 0 ? (
-                  productsWithComputedFields.map((product) => (
+                {stockListProducts.length > 0 ? (
+                  stockListProducts.map((product) => (
                     <tr key={product.id}>
                       <td>
                         <img
@@ -1138,7 +1206,12 @@ function App() {
                           loading="lazy"
                         />
                       </td>
-                      <td>{product.producto}</td>
+                      <td>
+                        <div className="product-name-cell">
+                          <span>{product.producto}</span>
+                          <ProductCompletionHint product={product} />
+                        </div>
+                      </td>
                       <td>{product.categoria}</td>
                       <td>{product.stock}</td>
                       <td>${product.precio.toLocaleString('es-AR')}</td>
@@ -1167,7 +1240,9 @@ function App() {
                 ) : (
                   <tr>
                     <td colSpan="8" className="empty-cell">
-                      No hay productos cargados. Pulsa "Agregar producto" para comenzar.
+                      {showOnlyToComplete
+                        ? 'No hay fichas con datos opcionales pendientes.'
+                        : 'No hay productos cargados. Podés agregarlos a mano o importar un Excel / CSV.'}
                     </td>
                   </tr>
                 )}
@@ -1175,14 +1250,15 @@ function App() {
             </table>
           </div>
           <div className="mobile-products">
-            {productsWithComputedFields.length > 0 ? (
-              productsWithComputedFields.map((product) => (
+            {stockListProducts.length > 0 ? (
+              stockListProducts.map((product) => (
                 <article key={product.id} className="mobile-product-card">
                   <div className="mobile-product-header">
                     <img className="product-image" src={product.imagenUrl} alt={product.producto} loading="lazy" />
                     <div>
                       <h3>{product.producto}</h3>
                       <p>{product.categoria}</p>
+                      <ProductCompletionHint product={product} />
                     </div>
                   </div>
                   <p className="mobile-description description-cell">{product.descripcion}</p>
@@ -1206,7 +1282,11 @@ function App() {
                 </article>
               ))
             ) : (
-              <p className="empty-cell">No hay productos cargados. Pulsa "Agregar producto" para comenzar.</p>
+              <p className="empty-cell">
+                {showOnlyToComplete
+                  ? 'No hay fichas con datos opcionales pendientes.'
+                  : 'No hay productos cargados. Podés agregarlos a mano o importar un Excel / CSV.'}
+              </p>
             )}
           </div>
         </section>
@@ -1843,6 +1923,19 @@ function App() {
         open={cameraScannerTarget != null}
         onDetected={handleCameraDetected}
         onClose={() => setCameraScannerTarget(null)}
+      />
+      <ProductImportWizard
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onManual={() => {
+          setImportOpen(false)
+          handleOpenCreate()
+        }}
+        onImport={handleImportProducts}
+        products={products}
+        signedIn={Boolean(user)}
+        canWrite={Boolean(subscription.active && businessId)}
+        businessId={businessId}
       />
     </main>
   )
