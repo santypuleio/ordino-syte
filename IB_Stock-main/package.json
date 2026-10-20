@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "seed:firebase": "node ./scripts/seedFirebase.mjs",
-    "test": "node --test src/lib/barcode.test.js src/lib/productImport.test.js src/lib/productCompletion.test.js"
+    "test": "node --test src/lib/barcode.test.js src/lib/productImport.test.js src/lib/productCompletion.test.js src/lib/mercadolibre.test.js"
   },
   "dependencies": {
     "@zxing/browser": "^0.2.1",

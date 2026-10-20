@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { readSpreadsheetFile } from '../lib/spreadsheet'
 import {
   IMPORT_FIELDS,
@@ -12,6 +12,7 @@ import {
   validateImport,
 } from '../lib/productImport'
 import { getProductCompletionStatus } from '../lib/productCompletion'
+import { buildMercadoLibreAuthUrl, reviewMercadoLibreItems } from '../lib/mercadolibre'
 
 const EMPTY_MAPPING = {
   name: '',
@@ -48,6 +49,8 @@ export default function ProductImportWizard({
   const [mapping, setMapping] = useState(EMPTY_MAPPING)
   const [result, setResult] = useState(null)
   const [addedCount, setAddedCount] = useState(0)
+  const [fromMl, setFromMl] = useState(false)
+  const popupRef = useRef(null)
 
   const sheet = sheets[sheetIndex] || null
   const matrix = sheet?.matrix || []
@@ -69,12 +72,74 @@ export default function ProductImportWizard({
     setMapping(EMPTY_MAPPING)
     setResult(null)
     setAddedCount(0)
+    setFromMl(false)
   }
 
   const close = () => {
     resetAll()
     onClose?.()
   }
+
+  const startMercadoLibre = () => {
+    const gate = canStartImport({ signedIn, canWrite, businessId })
+    if (!gate.ok) {
+      setError(gate.message)
+      return
+    }
+    const clientId = import.meta.env.VITE_ML_CLIENT_ID
+    const redirectUri = import.meta.env.VITE_ML_REDIRECT_URI
+    if (!clientId || !redirectUri) {
+      setError('Faltan las claves de Mercado Libre en el archivo local.')
+      return
+    }
+    const popup = window.open(
+      buildMercadoLibreAuthUrl({
+        clientId,
+        redirectUri,
+        returnTo: window.location.origin,
+      }),
+      'ordino-ml',
+      'width=520,height=720',
+    )
+    if (!popup) {
+      setError('El navegador bloqueó la ventana de Mercado Libre. Permití ventanas emergentes.')
+      return
+    }
+    popupRef.current = popup
+    setFromMl(true)
+    setError('')
+    setStep('ml')
+  }
+
+  useEffect(() => {
+    if (!open || step !== 'ml') return undefined
+    const onMessage = (event) => {
+      if (event.origin !== 'https://ordino-ar-stock.netlify.app' && event.origin !== 'https://stock.ordino.com.ar') {
+        return
+      }
+      if (event.data?.source !== 'ordino-ml') return
+      if (!event.data.ok) {
+        setError(event.data.message || 'No se pudieron leer las publicaciones.')
+        setStep('source')
+        return
+      }
+      const reviewed = reviewMercadoLibreItems(event.data.items, products)
+      setResult(reviewed)
+      setFileName('Mercado Libre')
+      setError(reviewed.tooLarge ? reviewed.message : '')
+      setStep(reviewed.tooLarge ? 'source' : 'review')
+    }
+    window.addEventListener('message', onMessage)
+    const timer = window.setInterval(() => {
+      if (popupRef.current && popupRef.current.closed) {
+        window.clearInterval(timer)
+      }
+    }, 500)
+    return () => {
+      window.removeEventListener('message', onMessage)
+      window.clearInterval(timer)
+    }
+  }, [open, step, products])
 
   const applySheet = (nextSheets, index, keepMapping = false) => {
     const next = nextSheets[index]
@@ -214,10 +279,24 @@ export default function ProductImportWizard({
               <strong>Tiendanube</strong>
               <span>Próximamente</span>
             </button>
-            <button type="button" className="import-choice" disabled>
+            <button type="button" className="import-choice" onClick={startMercadoLibre}>
               <strong>Mercado Libre</strong>
-              <span>Próximamente</span>
+              <span>Traé las publicaciones de tu cuenta.</span>
             </button>
+          </div>
+        )}
+
+        {step === 'ml' && (
+          <div className="import-step">
+            <strong>Esperando la autorización de Mercado Libre</strong>
+            <p className="sale-scan-hint">
+              Iniciá sesión en la ventana que se abrió y aceptá el permiso. Después vas a ver la lista antes de importar.
+            </p>
+            <div className="form-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setStep('source')}>
+                Volver
+              </button>
+            </div>
           </div>
         )}
 
@@ -407,8 +486,13 @@ export default function ProductImportWizard({
               >
                 {importing ? 'Importando…' : `Importar ${result.ready.length} productos nuevos`}
               </button>
-              <button type="button" className="btn btn-secondary" onClick={() => setStep('map')} disabled={importing}>
-                Corregir columnas
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setStep(fromMl ? 'source' : 'map')}
+                disabled={importing}
+              >
+                {fromMl ? 'Volver' : 'Corregir columnas'}
               </button>
             </div>
           </div>
