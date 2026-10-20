@@ -2,9 +2,11 @@ import { useState, useEffect } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth, firebaseConfigError } from "../lib/firebase";
+import { googleAuthErrorMessage, signInWithGoogle } from "../lib/googleAuth";
 import { useAuth } from "../context/AuthContext";
 import { getUserProfile } from "../lib/tenants";
 import { acceptTeamInvite, getInviteByToken, isInviteValid, rememberInviteToken, clearInviteToken, peekInviteToken } from "../lib/team";
+import GoogleAuthButton, { AuthDivider } from "../components/GoogleAuthButton";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -46,6 +48,35 @@ export default function LoginPage() {
     return <Navigate to="/gestionar" replace />;
   }
 
+  async function continueAfterAuth(cred) {
+    const invitedEmail = (invitePreview?.email || "").toLowerCase();
+    const signedEmail = (cred.user.email || "").toLowerCase();
+    if (inviteToken && invitedEmail && signedEmail !== invitedEmail) {
+      await logout();
+      throw new Error(`Esta invitación es para ${invitePreview.email}.`);
+    }
+
+    if (inviteToken) {
+      await acceptTeamInvite(inviteToken, {
+        uid: cred.user.uid,
+        email: cred.user.email,
+        displayName: cred.user.displayName,
+      });
+      await refreshProfile?.();
+      clearInviteToken();
+      navigate("/gestionar", { replace: true });
+      return;
+    }
+
+    const p = await getUserProfile(cred.user.uid);
+    setProfile(p);
+    if (p?.onboardingCompleted) {
+      navigate("/gestionar", { replace: true });
+    } else {
+      navigate("/onboarding", { replace: true });
+    }
+  }
+
   async function onSubmit(e) {
     e.preventDefault();
     setError("");
@@ -56,28 +87,27 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-
-      if (inviteToken) {
-        await acceptTeamInvite(inviteToken, {
-          uid: cred.user.uid,
-          email: cred.user.email,
-          displayName: cred.user.displayName,
-        });
-        await refreshProfile?.();
-        clearInviteToken();
-        navigate("/gestionar", { replace: true });
-        return;
-      }
-
-      const p = await getUserProfile(cred.user.uid);
-      setProfile(p);
-      if (p?.onboardingCompleted) {
-        navigate("/gestionar", { replace: true });
-      } else {
-        navigate("/onboarding", { replace: true });
-      }
+      await continueAfterAuth(cred);
     } catch (err) {
       setError(err?.message || "No se pudo iniciar sesión");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onGoogle() {
+    setError("");
+    if (firebaseConfigError) {
+      setError(firebaseConfigError);
+      return;
+    }
+    setBusy(true);
+    try {
+      const cred = await signInWithGoogle();
+      await continueAfterAuth(cred);
+    } catch (err) {
+      const message = googleAuthErrorMessage(err);
+      if (message) setError(message);
     } finally {
       setBusy(false);
     }
@@ -114,7 +144,7 @@ export default function LoginPage() {
         <p className="mt-2 text-sm text-zinc-400">
           {invitePreview
             ? `Unite a ${invitePreview.businessName} con tu cuenta.`
-            : "Entrá con tu email y contraseña para ir a stock y tienda."}
+            : "Entrá con Google o con tu email para ir a stock y tienda."}
         </p>
 
         {!loading && user && profile?.onboardingCompleted !== true && !inviteToken ? (
@@ -140,9 +170,12 @@ export default function LoginPage() {
           </div>
         ) : null}
 
+        <div className="mt-8 space-y-4 rounded-2xl border border-white/10 bg-ink-900/60 p-6 backdrop-blur">
+          <GoogleAuthButton disabled={busy} onClick={onGoogle} label="Ingresar con Google" />
+          <AuthDivider />
         <form
           onSubmit={onSubmit}
-          className="mt-8 space-y-4 rounded-2xl border border-white/10 bg-ink-900/60 p-6 backdrop-blur"
+          className="space-y-4"
         >
           <label className="block text-sm">
             <span className="text-zinc-400">Email</span>
@@ -182,6 +215,7 @@ export default function LoginPage() {
             {busy ? "Entrando…" : invitePreview ? "Ingresar y unirme" : "Ingresar"}
           </button>
         </form>
+        </div>
 
         <p className="mt-6 text-sm text-zinc-500">
           ¿Primera vez?{" "}

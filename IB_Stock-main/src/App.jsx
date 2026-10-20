@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth'
+import { googleAuthErrorMessage, signInWithGoogle } from './lib/googleAuth'
 import {
   addDoc,
   collection,
@@ -963,6 +964,20 @@ function App() {
     }
   }
 
+  const handleGoogleLogin = async () => {
+    setAuthError('')
+    if (!auth) {
+      setAuthError('Firebase no esta configurado en este entorno.')
+      return
+    }
+    try {
+      await signInWithGoogle()
+    } catch (error) {
+      const message = googleAuthErrorMessage(error)
+      if (message) setAuthError(message)
+    }
+  }
+
   return (
     <main className="page">
       {firebaseConfigError && (
@@ -981,7 +996,7 @@ function App() {
         <section className="card auth-card">
           <h2>Iniciar sesion</h2>
           <p className="section-help">
-            Usá la misma cuenta que creaste en la landing Ordino.
+            Usá la misma cuenta de la landing: Google o email.
             {LANDING_URL ? (
               <>
                 {' '}
@@ -991,6 +1006,10 @@ function App() {
               </>
             ) : null}
           </p>
+          <button type="button" className="google-btn" onClick={handleGoogleLogin}>
+            Continuar con Google
+          </button>
+          <p className="auth-divider">o con email</p>
           <form className="product-form auth-form" onSubmit={handleLogin}>
             <label>
               Email

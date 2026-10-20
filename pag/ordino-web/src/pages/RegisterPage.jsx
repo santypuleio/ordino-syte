@@ -2,8 +2,10 @@ import { useState, useEffect } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { auth, firebaseConfigError } from "../lib/firebase";
+import { googleAuthErrorMessage, signInWithGoogle } from "../lib/googleAuth";
 import { useAuth } from "../context/AuthContext";
-import { getBusiness } from "../lib/tenants";
+import { getBusiness, getUserProfile } from "../lib/tenants";
+import GoogleAuthButton, { AuthDivider } from "../components/GoogleAuthButton";
 import {
   acceptTeamInvite,
   clearInviteToken,
@@ -17,7 +19,7 @@ export default function RegisterPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const inviteToken = searchParams.get("invite") || peekInviteToken() || "";
-  const { user, profile, loading, refreshProfile, setProfile, setBusiness } = useAuth();
+  const { user, profile, loading, refreshProfile, setProfile, setBusiness, logout } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -94,6 +96,51 @@ export default function RegisterPage() {
     navigate("/gestionar", { replace: true });
   }
 
+  async function onGoogle() {
+    setError("");
+    if (firebaseConfigError) {
+      setError(firebaseConfigError);
+      return;
+    }
+    if (inviteErr) return;
+
+    setBusy(true);
+    try {
+      const cred = await signInWithGoogle();
+
+      if (inviteToken) {
+        const invited = invitePreview || (await getInviteByToken(inviteToken));
+        const check = isInviteValid(invited);
+        if (!check.ok) {
+          await logout();
+          setError(check.reason);
+          return;
+        }
+        const invitedEmail = (invited.email || "").toLowerCase();
+        const signedEmail = (cred.user.email || "").toLowerCase();
+        if (invitedEmail && signedEmail !== invitedEmail) {
+          await logout();
+          setError(`Esta invitación es para ${invited.email}.`);
+          return;
+        }
+        await finishAsStaff(cred);
+        return;
+      }
+
+      const existing = await getUserProfile(cred.user.uid);
+      if (existing?.onboardingCompleted) {
+        navigate("/gestionar", { replace: true });
+      } else {
+        navigate("/onboarding", { replace: true });
+      }
+    } catch (err) {
+      const message = googleAuthErrorMessage(err);
+      if (message) setError(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSubmit(e) {
     e.preventDefault();
     setError("");
@@ -148,7 +195,7 @@ export default function RegisterPage() {
         <p className="mt-2 text-sm text-zinc-400">
           {invitePreview || inviteToken
             ? `Te unís${invitePreview?.businessName ? ` a ${invitePreview.businessName}` : ""} como empleado. No tenés que configurar una marca.`
-            : "En el siguiente paso configurás tu marca y se generan stock + tienda."}
+            : "Podés usar Google o tu email. Después configurás tu marca y se generan stock + tienda."}
         </p>
 
         {inviteErr ? (
@@ -157,9 +204,21 @@ export default function RegisterPage() {
           </div>
         ) : null}
 
+        <div className="mt-8 space-y-4 rounded-2xl border border-white/10 bg-ink-900/60 p-6 backdrop-blur">
+          <GoogleAuthButton
+            disabled={busy || Boolean(inviteErr)}
+            onClick={onGoogle}
+            label="Crear cuenta con Google"
+          />
+          {error ? (
+            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+              {error}
+            </div>
+          ) : null}
+          <AuthDivider />
         <form
           onSubmit={onSubmit}
-          className="mt-8 space-y-4 rounded-2xl border border-white/10 bg-ink-900/60 p-6 backdrop-blur"
+          className="space-y-4"
         >
           <label className="block text-sm">
             <span className="text-zinc-400">Tu nombre</span>
@@ -193,12 +252,6 @@ export default function RegisterPage() {
             />
           </label>
 
-          {error && (
-            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {error}
-            </div>
-          )}
-
           <button
             type="submit"
             disabled={busy || Boolean(inviteErr)}
@@ -207,6 +260,7 @@ export default function RegisterPage() {
             {busy ? "Creando…" : inviteToken ? "Crear cuenta y unirme" : "Continuar"}
           </button>
         </form>
+        </div>
 
         <p className="mt-6 text-sm text-zinc-500">
           ¿Ya tenés cuenta?{" "}
