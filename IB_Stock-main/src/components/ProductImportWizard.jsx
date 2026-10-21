@@ -12,7 +12,7 @@ import {
   validateImport,
 } from '../lib/productImport'
 import { getProductCompletionStatus } from '../lib/productCompletion'
-import { buildMercadoLibreAuthUrl, reviewMercadoLibreItems } from '../lib/mercadolibre'
+import { reviewMercadoLibreItems } from '../lib/mercadolibre'
 
 const EMPTY_MAPPING = {
   name: '',
@@ -86,21 +86,9 @@ export default function ProductImportWizard({
       setError(gate.message)
       return
     }
-    const clientId = import.meta.env.VITE_ML_CLIENT_ID
-    const redirectUri = import.meta.env.VITE_ML_REDIRECT_URI
-    if (!clientId || !redirectUri) {
-      setError('Faltan las claves de Mercado Libre en el archivo local.')
-      return
-    }
-    const popup = window.open(
-      buildMercadoLibreAuthUrl({
-        clientId,
-        redirectUri,
-        returnTo: window.location.origin,
-      }),
-      'ordino-ml',
-      'width=520,height=720',
-    )
+    const startUrl = new URL('https://ordino-ar-stock.netlify.app/.netlify/functions/ml-oauth-start')
+    startUrl.searchParams.set('returnTo', window.location.origin)
+    const popup = window.open(startUrl.toString(), 'ordino-ml', 'width=520,height=720')
     if (!popup) {
       setError('El navegador bloqueó la ventana de Mercado Libre. Permití ventanas emergentes.')
       return
